@@ -1,0 +1,248 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: notifications-service
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: fintech-kafka
+    domain: notifications
+    service: notifications-service
+spec:
+  # TLS client authentication
+  authentication:
+    type: tls
+  
+  # Authorization with ACLs
+  authorization:
+    type: simple
+    acls:
+      # ==========================================
+      # PRODUCER PERMISSIONS - Notification Topics
+      # ==========================================
+      
+      # Produce to email notifications topic
+      - resource:
+          type: topic
+          name: notifications.email
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # Produce to SMS notifications topic
+      - resource:
+          type: topic
+          name: notifications.sms
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # Produce to push notifications topic
+      - resource:
+          type: topic
+          name: notifications.push
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # Produce to notification audit topic
+      - resource:
+          type: topic
+          name: notifications.audit
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # ==========================================
+      # CONSUMER PERMISSIONS - Notification Topics
+      # ==========================================
+      
+      # Consume from email notifications (for delivery workers)
+      - resource:
+          type: topic
+          name: notifications.email
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consume from SMS notifications
+      - resource:
+          type: topic
+          name: notifications.sms
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consume from push notifications
+      - resource:
+          type: topic
+          name: notifications.push
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consumer group for notifications service
+      - resource:
+          type: group
+          name: notifications-service
+        operations:
+          - Read
+        host: "*"
+      
+      # Consumer group for email workers
+      - resource:
+          type: group
+          name: notifications-service-email-worker
+        operations:
+          - Read
+        host: "*"
+      
+      # Consumer group for SMS workers
+      - resource:
+          type: group
+          name: notifications-service-sms-worker
+        operations:
+          - Read
+        host: "*"
+      
+      # Consumer group for push workers
+      - resource:
+          type: group
+          name: notifications-service-push-worker
+        operations:
+          - Read
+        host: "*"
+      
+      # ==========================================
+      # CROSS-DOMAIN PERMISSIONS
+      # ==========================================
+      
+      # Consume from payments events (for payment notifications)
+      - resource:
+          type: topic
+          name: payments.events
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consumer group for payment event processing
+      - resource:
+          type: group
+          name: notifications-service-payment-events
+        operations:
+          - Read
+        host: "*"
+      
+      # Consume from ledger transactions (for balance alerts)
+      - resource:
+          type: topic
+          name: ledger.transactions
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consumer group for ledger event processing
+      - resource:
+          type: group
+          name: notifications-service-ledger-events
+        operations:
+          - Read
+        host: "*"
+      
+      # Produce to audit events (for notification tracking)
+      - resource:
+          type: topic
+          name: audit.events
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # ==========================================
+      # TRANSACTIONAL PERMISSIONS
+      # ==========================================
+      
+      # Transactional ID for notification deduplication
+      - resource:
+          type: transactionalId
+          name: notifications-service
+          patternType: prefix
+        operations:
+          - Describe
+          - Write
+        host: "*"
+  
+  # Resource quotas
+  quotas:
+    producerByteRate: 5242880   # 5 MB/s (notifications are smaller)
+    consumerByteRate: 10485760  # 10 MB/s
+    requestPercentage: 40       # 40% of broker CPU time
+    controllerMutationRate: 10  # 10 mutations/sec
+
+---
+# ConfigMap for client configuration template
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notifications-service-kafka-config
+  namespace: kafka
+data:
+  application.properties: |
+    # Kafka Bootstrap Servers
+    bootstrap.servers=fintech-kafka-kafka-bootstrap:9093
+    
+    # Security Configuration
+    security.protocol=SSL
+    ssl.truststore.location=/etc/kafka-certs/ca.p12
+    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.keystore.location=/etc/kafka-certs/user.p12
+    ssl.keystore.password=${KEYSTORE_PASSWORD}
+    
+    # Producer Configuration
+    key.serializer=org.apache.kafka.common.serialization.StringSerializer
+    value.serializer=io.confluent.kafka.serializers.KafkaAvroSerializer
+    schema.registry.url=http://schema-registry:8081
+    
+    # Exactly-once semantics (prevent duplicate notifications)
+    enable.idempotence=true
+    acks=all
+    max.in.flight.requests.per.connection=5
+    transactional.id=notifications-service-${POD_NAME}
+    
+    # Performance tuning
+    batch.size=16384
+    linger.ms=100  # Higher latency OK for notifications
+    compression.type=snappy
+    buffer.memory=33554432
+    
+    # Consumer Configuration
+    key.deserializer=org.apache.kafka.common.serialization.StringDeserializer
+    value.deserializer=io.confluent.kafka.serializers.KafkaAvroDeserializer
+    
+    # Consumer group
+    group.id=notifications-service
+    
+    # Exactly-once for consumers
+    enable.auto.commit=false
+    isolation.level=read_committed
+    
+    # Consumer tuning
+    fetch.min.bytes=1024  # Batch notifications
+    fetch.max.wait.ms=1000
+    max.poll.records=1000  # Process many notifications at once
+    max.poll.interval.ms=300000
+    
+    # Retry Configuration
+    retries=3
+    retry.backoff.ms=1000
+    
+    # Monitoring
+    metrics.recording.level=DEBUG
