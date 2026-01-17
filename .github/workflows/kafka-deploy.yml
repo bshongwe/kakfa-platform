@@ -585,8 +585,14 @@ jobs:
     if: always()
     steps:
       - name: Send Slack notification
-        if: always() && secrets.SLACK_WEBHOOK != ''
+        if: always()
         run: |
+          # Only send notification if webhook is configured
+          if [ -z "${{ secrets.SLACK_WEBHOOK }}" ]; then
+            echo "No Slack webhook configured, skipping notification"
+            exit 0
+          fi
+          
           if [ "${{ needs.deploy-production.result }}" == "success" ]; then
             COLOR="good"
             STATUS="✅ SUCCESS"
