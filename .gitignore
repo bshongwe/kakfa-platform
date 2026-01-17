@@ -1,0 +1,49 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars.backup
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Secrets
+*.key
+*.pem
+*.p12
+*.jks
+*.password
+security/secrets/*
+!security/secrets/.gitkeep
+
+# Certificates
+security/certificates/*.crt
+security/certificates/*.key
+security/certificates/*.pem
+
+# Kubeconfig
+kubeconfig
+*.kubeconfig
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+
+# Node modules (if any)
+node_modules/

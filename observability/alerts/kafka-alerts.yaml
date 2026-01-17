@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-alert-rules
+  namespace: monitoring
+data:
+  kafka-alerts.yml: |
+    groups:
+      - name: kafka_alerts
+        interval: 30s
+        rules:
+          # Broker availability
+          - alert: KafkaBrokerDown
+            expr: kafka_brokers < 3
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kafka broker is down"
+              description: "Less than 3 Kafka brokers are running. Current count: {{ $value }}"
+          
+          # Under-replicated partitions
+          - alert: KafkaUnderReplicatedPartitions
+            expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kafka has under-replicated partitions"
+              description: "Kafka has {{ $value }} under-replicated partitions on broker {{ $labels.instance }}"
+          
+          # Offline partitions
+          - alert: KafkaOfflinePartitions
+            expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kafka has offline partitions"
+              description: "Kafka has {{ $value }} offline partitions"
+          
+          # High consumer lag
+          - alert: KafkaConsumerLagHigh
+            expr: kafka_consumergroup_lag > 10000
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kafka consumer lag is high"
+              description: "Consumer group {{ $labels.consumergroup }} has lag of {{ $value }} on topic {{ $labels.topic }}"
+          
+          # Disk usage
+          - alert: KafkaDiskUsageHigh
+            expr: (kafka_log_log_size / kafka_log_log_size_limit) > 0.85
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kafka disk usage is high"
+              description: "Kafka broker {{ $labels.instance }} disk usage is {{ $value | humanizePercentage }}"
+          
+          # Active controller
+          - alert: KafkaNoActiveController
+            expr: sum(kafka_controller_kafkacontroller_activecontrollercount) != 1
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kafka cluster has no active controller"
+              description: "Kafka cluster has {{ $value }} active controllers (should be 1)"

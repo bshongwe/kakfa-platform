@@ -1,0 +1,43 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: example-user
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Producer permissions
+      - resource:
+          type: topic
+          name: example-topic
+          patternType: literal
+        operations:
+          - Write
+          - Create
+          - Describe
+        host: "*"
+      # Consumer permissions
+      - resource:
+          type: topic
+          name: example-topic
+          patternType: literal
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      - resource:
+          type: group
+          name: example-consumer-group
+          patternType: literal
+        operations:
+          - Read
+        host: "*"
+  quotas:
+    producerByteRate: 1048576  # 1 MB/s
+    consumerByteRate: 2097152  # 2 MB/s
+    requestPercentage: 55
