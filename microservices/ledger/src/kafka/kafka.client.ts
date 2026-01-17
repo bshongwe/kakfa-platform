@@ -13,8 +13,12 @@ export class KafkaClient {
     this.kafka = new Kafka({
       clientId: config.clientId,
       brokers: config.brokers,
-      sasl: {
-        mechanism: config.sasl.mechanism,
+      sasl: config.sasl.mechanism === 'scram-sha-256' ? {
+        mechanism: 'scram-sha-256' as const,
+        username: config.sasl.username,
+        password: config.sasl.password,
+      } : {
+        mechanism: 'scram-sha-512' as const,
         username: config.sasl.username,
         password: config.sasl.password,
       },
