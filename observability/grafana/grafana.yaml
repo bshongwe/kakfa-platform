@@ -1,3 +1,70 @@
+---
+# ServiceAccount for Grafana
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+---
+# Role for Grafana - read access to config maps and secrets
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: grafana
+  namespace: monitoring
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list"]
+---
+# RoleBinding to bind ServiceAccount to Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: grafana
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: grafana
+subjects:
+  - kind: ServiceAccount
+    name: grafana
+    namespace: monitoring
+---
+# PersistentVolumeClaim for Grafana dashboards and data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-storage
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi  # Dashboards, plugins, and SQLite database
+  storageClassName: standard  # Adjust based on your cluster
+---
+# Secret for Grafana admin password
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin
+  namespace: monitoring
+  labels:
+    app: grafana
+type: Opaque
+stringData:
+  password: "admin123"  # CHANGE THIS IN PRODUCTION!
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +80,11 @@ spec:
       labels:
         app: grafana
     spec:
+      serviceAccountName: grafana  # Bind ServiceAccount
+      securityContext:
+        fsGroup: 472  # Grafana user group
+        runAsNonRoot: true
+        runAsUser: 472  # Grafana user
       containers:
         - name: grafana
           image: grafana/grafana:10.2.2
@@ -25,7 +97,15 @@ spec:
                   name: grafana-admin
                   key: password
             - name: GF_INSTALL_PLUGINS
-              value: "grafana-piechart-panel"
+              value: "grafana-piechart-panel,grafana-clock-panel"
+            - name: GF_PATHS_DATA
+              value: /var/lib/grafana
+            - name: GF_PATHS_LOGS
+              value: /var/log/grafana
+            - name: GF_PATHS_PLUGINS
+              value: /var/lib/grafana/plugins
+            - name: GF_PATHS_PROVISIONING
+              value: /etc/grafana/provisioning
           volumeMounts:
             - name: grafana-storage
               mountPath: /var/lib/grafana
@@ -33,13 +113,39 @@ spec:
               mountPath: /etc/grafana/provisioning/datasources
             - name: grafana-dashboards-config
               mountPath: /etc/grafana/provisioning/dashboards
+            - name: grafana-logs
+              mountPath: /var/log/grafana
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: "512Mi"
               cpu: "250m"
+              ephemeral-storage: "1Gi"  # Plugin installation and temp files
             limits:
               memory: "1Gi"
               cpu: "500m"
+              ephemeral-storage: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: false  # Grafana needs write access for plugins
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
       volumes:
         - name: grafana-storage
           persistentVolumeClaim:
@@ -50,18 +156,30 @@ spec:
         - name: grafana-dashboards-config
           configMap:
             name: grafana-dashboards-config
+        - name: grafana-logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: grafana
   namespace: monitoring
+  labels:
+    app: grafana
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3000"
+    prometheus.io/path: "/metrics"
 spec:
   selector:
     app: grafana
   ports:
-    - port: 3000
+    - name: http
+      port: 3000
       targetPort: 3000
+      protocol: TCP
   type: LoadBalancer
 ---
 apiVersion: v1
@@ -69,6 +187,8 @@ kind: ConfigMap
 metadata:
   name: grafana-datasources
   namespace: monitoring
+  labels:
+    app: grafana
 data:
   prometheus.yaml: |
     apiVersion: 1
@@ -76,6 +196,86 @@ data:
       - name: Prometheus
         type: prometheus
         access: proxy
-        url: http://prometheus:9090
+        url: http://prometheus.monitoring.svc.cluster.local:9090
         isDefault: true
         editable: true
+        jsonData:
+          timeInterval: "15s"
+          httpMethod: POST
+---
+# ConfigMap for dashboard provisioning
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-config
+  namespace: monitoring
+  labels:
+    app: grafana
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'Kafka Dashboards'
+        orgId: 1
+        folder: 'Kafka'
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards/kafka
+      - name: 'System Dashboards'
+        orgId: 1
+        folder: 'System'
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards/system
+---
+# NetworkPolicy for Grafana (optional security)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app: grafana
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow access from anywhere on port 3000 (LoadBalancer)
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # Allow access to Prometheus
+    - to:
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+    # Allow DNS queries
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow HTTPS for plugin downloads
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+
