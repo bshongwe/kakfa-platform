@@ -5,16 +5,9 @@ on:
     branches:
       - main
       - develop
-    paths:
-      - 'platform/**'
-      - 'schemas/**'
-      - '.github/workflows/kafka-deploy.yml'
   pull_request:
     branches:
       - main
-    paths:
-      - 'platform/**'
-      - 'schemas/**'
 
 env:
   KUBECTL_VERSION: ${{ vars.KUBECTL_VERSION || 'latest' }}
