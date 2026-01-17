@@ -1,0 +1,102 @@
+{
+  "namespace": "com.fintech.payments.v1",
+  "type": "record",
+  "name": "PaymentEvent",
+  "doc": "Event representing a payment state change",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string",
+      "doc": "Unique event identifier (UUID)"
+    },
+    {
+      "name": "paymentId",
+      "type": "string",
+      "doc": "Payment identifier"
+    },
+    {
+      "name": "commandId",
+      "type": "string",
+      "doc": "Original command ID that triggered this event"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Event timestamp"
+    },
+    {
+      "name": "eventType",
+      "type": {
+        "type": "enum",
+        "name": "PaymentEventType",
+        "symbols": [
+          "PAYMENT_INITIATED",
+          "PAYMENT_VALIDATED",
+          "PAYMENT_AUTHORIZED",
+          "PAYMENT_PROCESSING",
+          "PAYMENT_COMPLETED",
+          "PAYMENT_FAILED",
+          "PAYMENT_CANCELLED",
+          "PAYMENT_REFUNDED"
+        ]
+      },
+      "doc": "Type of payment event"
+    },
+    {
+      "name": "status",
+      "type": {
+        "type": "enum",
+        "name": "PaymentStatus",
+        "symbols": [
+          "PENDING",
+          "PROCESSING",
+          "COMPLETED",
+          "FAILED",
+          "CANCELLED",
+          "REFUNDED"
+        ]
+      },
+      "doc": "Current payment status"
+    },
+    {
+      "name": "sourceAccountId",
+      "type": "string"
+    },
+    {
+      "name": "destinationAccountId",
+      "type": "string"
+    },
+    {
+      "name": "amount",
+      "type": {
+        "type": "record",
+        "name": "MoneyEvent",
+        "fields": [
+          {"name": "value", "type": "long"},
+          {"name": "currency", "type": "string"}
+        ]
+      }
+    },
+    {
+      "name": "errorCode",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Error code if payment failed"
+    },
+    {
+      "name": "errorMessage",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Error message if payment failed"
+    },
+    {
+      "name": "metadata",
+      "type": {
+        "type": "map",
+        "values": "string"
+      },
+      "default": {}
+    }
+  ]
+}

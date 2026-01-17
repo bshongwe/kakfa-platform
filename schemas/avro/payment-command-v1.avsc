@@ -1,0 +1,76 @@
+{
+  "namespace": "com.fintech.payments.v1",
+  "type": "record",
+  "name": "PaymentCommand",
+  "doc": "Command to initiate a payment transaction",
+  "fields": [
+    {
+      "name": "commandId",
+      "type": "string",
+      "doc": "Unique command identifier (UUID)"
+    },
+    {
+      "name": "idempotencyKey",
+      "type": "string",
+      "doc": "Client-provided idempotency key"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Command timestamp in epoch milliseconds"
+    },
+    {
+      "name": "correlationId",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Correlation ID for request tracing"
+    },
+    {
+      "name": "sourceAccountId",
+      "type": "string",
+      "doc": "Source account identifier"
+    },
+    {
+      "name": "destinationAccountId",
+      "type": "string",
+      "doc": "Destination account identifier"
+    },
+    {
+      "name": "amount",
+      "type": {
+        "type": "record",
+        "name": "Money",
+        "fields": [
+          {"name": "value", "type": "long", "doc": "Amount in smallest currency unit (cents)"},
+          {"name": "currency", "type": "string", "doc": "ISO 4217 currency code"}
+        ]
+      },
+      "doc": "Payment amount"
+    },
+    {
+      "name": "paymentMethod",
+      "type": {
+        "type": "enum",
+        "name": "PaymentMethod",
+        "symbols": ["ACH", "WIRE", "CARD", "WALLET", "INSTANT"]
+      },
+      "doc": "Payment method type"
+    },
+    {
+      "name": "reference",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Payment reference or memo"
+    },
+    {
+      "name": "metadata",
+      "type": {
+        "type": "map",
+        "values": "string"
+      },
+      "default": {},
+      "doc": "Additional metadata"
+    }
+  ]
+}
