@@ -1,0 +1,52 @@
+{
+  "name": "@kakfa-platform/payments-service",
+  "version": "1.0.0",
+  "description": "Payment processing microservice with Kafka integration",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "kafka",
+    "payments",
+    "microservice",
+    "event-driven"
+  ],
+  "author": "Kafka Platform Team",
+  "license": "MIT",
+  "dependencies": {
+    "kafkajs": "^2.2.4",
+    "avsc": "^5.7.7",
+    "express": "^4.18.2",
+    "prom-client": "^15.1.0",
+    "winston": "^3.11.0",
+    "dotenv": "^16.3.1",
+    "zod": "^3.22.4",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "@types/uuid": "^9.0.7",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
