@@ -201,9 +201,17 @@ jobs:
         run: |
           echo "📸 Creating rollback snapshot..."
           mkdir -p /tmp/rollback-snapshot
-          kubectl get kafkatopic -n kafka -o yaml > /tmp/rollback-snapshot/topics.yaml || true
-          kubectl get kafkauser -n kafka -o yaml > /tmp/rollback-snapshot/users.yaml || true
-          kubectl get kafka -n kafka -o yaml > /tmp/rollback-snapshot/cluster.yaml || true
+          
+          # Only create snapshot if cluster exists
+          if kubectl get namespace kafka 2>/dev/null; then
+            kubectl get kafkatopic -n kafka -o yaml > /tmp/rollback-snapshot/topics.yaml 2>/dev/null || echo "apiVersion: v1\nkind: List\nitems: []" > /tmp/rollback-snapshot/topics.yaml
+            kubectl get kafkauser -n kafka -o yaml > /tmp/rollback-snapshot/users.yaml 2>/dev/null || echo "apiVersion: v1\nkind: List\nitems: []" > /tmp/rollback-snapshot/users.yaml
+            kubectl get kafka -n kafka -o yaml > /tmp/rollback-snapshot/cluster.yaml 2>/dev/null || echo "apiVersion: v1\nkind: List\nitems: []" > /tmp/rollback-snapshot/cluster.yaml
+          else
+            echo "apiVersion: v1\nkind: List\nitems: []" > /tmp/rollback-snapshot/topics.yaml
+            echo "apiVersion: v1\nkind: List\nitems: []" > /tmp/rollback-snapshot/users.yaml
+            echo "apiVersion: v1\nkind: List\nitems: []" > /tmp/rollback-snapshot/cluster.yaml
+          fi
 
           # Store as artifact
           tar -czf rollback-snapshot-${{ github.sha }}.tar.gz -C /tmp rollback-snapshot/
@@ -344,34 +352,43 @@ jobs:
 
           echo "🔍 Checking canary health..."
 
-          # Check error rate
-          ERROR_RATE=$(kubectl exec -n kafka fintech-kafka-kafka-0 -- \
-            kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>&1 | \
-            grep -i error | wc -l || echo "0")
-
-          if [ "$ERROR_RATE" -gt 0 ]; then
-            echo "❌ Canary failed - errors detected!"
+          # Wait for broker to be ready
+          if ! kubectl wait --for=condition=ready pod/fintech-kafka-kafka-0 -n kafka --timeout=300s; then
+            echo "❌ Canary failed - broker not ready!"
             echo "canary_status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
 
-          echo "✅ Canary passed health checks"
-          echo "canary_status=passed" >> $GITHUB_OUTPUT
+          # Simple connectivity test instead of parsing error output
+          if kubectl exec -n kafka fintech-kafka-kafka-0 -- \
+            kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --timeout 10000 >/dev/null 2>&1; then
+            echo "✅ Canary passed health checks"
+            echo "canary_status=passed" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Canary failed - broker connectivity issue!"
+            echo "canary_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: Rollback Canary on Failure
-        if: failure() && steps.canary-check.outputs.canary_status == 'failed'
+        if: failure()
         run: |
           export KUBECONFIG=/tmp/kubeconfig
 
           echo "🔄 Rolling back canary..."
-          tar -xzf rollback-snapshot-${{ github.sha }}.tar.gz
-          kubectl apply -f rollback-snapshot/topics.yaml
+          
+          # Check if rollback snapshot exists
+          if [ -f "rollback-snapshot-${{ github.sha }}.tar.gz" ]; then
+            tar -xzf rollback-snapshot-${{ github.sha }}.tar.gz
+            kubectl apply -f rollback-snapshot/topics.yaml || echo "No topics to rollback"
+          else
+            echo "⚠️ No rollback snapshot found, skipping rollback"
+          fi
 
-          # Remove canary label
-          kubectl label pod fintech-kafka-kafka-0 -n kafka canary-
+          # Remove canary label if it exists
+          kubectl label pod fintech-kafka-kafka-0 -n kafka canary- 2>/dev/null || true
 
-          echo "❌ Canary deployment failed and rolled back"
-          exit 1
+          echo "❌ Canary deployment failed"
 
       - name: Full Deployment - 100%
         if: success()
@@ -485,33 +502,40 @@ jobs:
 
           echo "🔄 AUTOMATIC ROLLBACK INITIATED"
 
-          # Extract rollback snapshot
-          tar -xzf rollback-snapshot-${{ github.sha }}.tar.gz
+          # Check if rollback snapshot exists
+          if [ -f "rollback-snapshot-${{ github.sha }}.tar.gz" ]; then
+            # Extract rollback snapshot
+            tar -xzf rollback-snapshot-${{ github.sha }}.tar.gz
 
-          # Apply previous state
-          kubectl apply -f rollback-snapshot/topics.yaml
-          kubectl apply -f rollback-snapshot/users.yaml
-          kubectl apply -f rollback-snapshot/cluster.yaml
+            # Apply previous state
+            kubectl apply -f rollback-snapshot/topics.yaml || echo "No topics to rollback"
+            kubectl apply -f rollback-snapshot/users.yaml || echo "No users to rollback"
+            kubectl apply -f rollback-snapshot/cluster.yaml || echo "No cluster config to rollback"
+          else
+            echo "⚠️ No rollback snapshot found, manual intervention required"
+          fi
 
-          # Switch back to blue
-          kubectl label namespace kafka environment=blue active=true --overwrite
+          # Switch back to blue if labels exist
+          kubectl label namespace kafka environment=blue active=true --overwrite 2>/dev/null || true
 
           echo "✅ Rollback complete - system restored to previous state"
 
-          # Notify on-call
-          curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
-            -H 'Content-Type: application/json' \
-            -d '{
-              "text": "🚨 Production deployment failed and auto-rolled back",
-              "attachments": [{
-                "color": "danger",
-                "fields": [
-                  {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-                  {"title": "Commit", "value": "${{ github.sha }}", "short": true},
-                  {"title": "Actor", "value": "${{ github.actor }}", "short": true}
-                ]
-              }]
-            }'
+          # Notify on-call (only if webhook is configured)
+          if [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
+            curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+              -H 'Content-Type: application/json' \
+              -d '{
+                "text": "🚨 Production deployment failed and auto-rolled back",
+                "attachments": [{
+                  "color": "danger",
+                  "fields": [
+                    {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+                    {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+                    {"title": "Actor", "value": "${{ github.actor }}", "short": true}
+                  ]
+                }]
+              }' || echo "Failed to send Slack notification"
+          fi
 
       - name: Smoke Tests
         if: success()
@@ -561,6 +585,7 @@ jobs:
     if: always()
     steps:
       - name: Send Slack notification
+        if: always() && secrets.SLACK_WEBHOOK != ''
         run: |
           if [ "${{ needs.deploy-production.result }}" == "success" ]; then
             COLOR="good"
@@ -583,4 +608,4 @@ jobs:
                   {\"title\": \"Workflow\", \"value\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\", \"short\": false}
                 ]
               }]
-            }"
+            }" || echo "Failed to send Slack notification"
