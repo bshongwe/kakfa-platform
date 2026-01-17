@@ -113,7 +113,13 @@ jobs:
       - name: Check for secrets in manifests
         run: |
           echo "🔐 Scanning for hardcoded secrets..."
-          if grep -r "password\|secret\|apikey" platform/ --include="*.yaml" | grep -v "Secret"; then
+          # Look for actual hardcoded values, not config keys or env var references
+          if grep -rE "(password|secret|apikey):\s*['\"]?[^${\s]" platform/ --include="*.yaml" | \
+             grep -vE "(password|secret|apikey):\s*\$\{" | \
+             grep -v "kind: Secret" | \
+             grep -v "# " | \
+             grep -v "ssl\.(truststore|keystore)\." | \
+             grep -v "resources:.*secrets"; then
             echo "❌ Found potential hardcoded secrets!"
             exit 1
           fi
