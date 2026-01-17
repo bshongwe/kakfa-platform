@@ -248,8 +248,12 @@ jobs:
             exit 1
           fi
           echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > /tmp/kubeconfig
+          chmod 600 /tmp/kubeconfig
           export KUBECONFIG=/tmp/kubeconfig
-          kubectl cluster-info
+          
+          # Verify connection
+          kubectl cluster-info --request-timeout=10s
+          kubectl get nodes --request-timeout=10s
 
       - name: Apply Kafka resources
         run: |
@@ -320,8 +324,12 @@ jobs:
         if: steps.check-config.outputs.configured == 'true'
         run: |
           echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > /tmp/kubeconfig
+          chmod 600 /tmp/kubeconfig
           export KUBECONFIG=/tmp/kubeconfig
-          kubectl cluster-info
+          
+          # Verify connection
+          kubectl cluster-info --request-timeout=10s
+          kubectl get nodes --request-timeout=10s
 
       - name: Download rollback snapshot
         if: steps.check-config.outputs.configured == 'true'
@@ -347,10 +355,32 @@ jobs:
 
       - name: Canary Health Check
         id: canary-check
+        if: steps.check-config.outputs.configured == 'true'
         run: |
           export KUBECONFIG=/tmp/kubeconfig
 
           echo "🔍 Checking canary health..."
+
+          # First verify kubectl is working
+          if ! kubectl get nodes --request-timeout=10s >/dev/null 2>&1; then
+            echo "❌ Cannot connect to Kubernetes cluster"
+            echo "canary_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Check if kafka namespace exists
+          if ! kubectl get namespace kafka >/dev/null 2>&1; then
+            echo "❌ Kafka namespace not found"
+            echo "canary_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Check if broker pod exists
+          if ! kubectl get pod fintech-kafka-kafka-0 -n kafka >/dev/null 2>&1; then
+            echo "❌ Kafka broker pod not found"
+            echo "canary_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
           # Wait for broker to be ready
           if ! kubectl wait --for=condition=ready pod/fintech-kafka-kafka-0 -n kafka --timeout=300s; then
@@ -359,7 +389,7 @@ jobs:
             exit 1
           fi
 
-          # Simple connectivity test instead of parsing error output
+          # Simple connectivity test
           if kubectl exec -n kafka fintech-kafka-kafka-0 -- \
             kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --timeout 10000 >/dev/null 2>&1; then
             echo "✅ Canary passed health checks"
@@ -436,8 +466,18 @@ jobs:
 
       - name: Configure kubectl
         run: |
+          if [ -z "${{ secrets.KUBECONFIG_PROD }}" ]; then
+            echo "❌ KUBECONFIG_PROD secret not configured"
+            echo "ℹ️  Skipping deployment - set up KUBECONFIG_PROD in repository secrets"
+            exit 1
+          fi
           echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > /tmp/kubeconfig
+          chmod 600 /tmp/kubeconfig
           export KUBECONFIG=/tmp/kubeconfig
+          
+          # Verify connection
+          kubectl cluster-info --request-timeout=10s
+          kubectl get nodes --request-timeout=10s
 
       - name: Download rollback snapshot
         uses: actions/download-artifact@v4
