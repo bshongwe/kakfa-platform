@@ -433,6 +433,7 @@ jobs:
           echo "✅ Full deployment complete"
 
       - name: Post-Deployment Validation
+        if: steps.check-config.outputs.configured == 'true'
         run: |
           echo "✅ Running post-deployment validation..."
 
