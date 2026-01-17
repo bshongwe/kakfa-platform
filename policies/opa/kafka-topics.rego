@@ -222,13 +222,8 @@ deny contains msg if {
 # HELPER FUNCTIONS
 # ============================================
 
-# Convert string to number safely
-to_number(value) = num {
+# Convert value to number safely
+to_number(value) = num if {
     is_number(value)
     num := value
-}
-
-to_number(value) = num {
-    is_string(value)
-    num := to_number(trim_space(value))
 }

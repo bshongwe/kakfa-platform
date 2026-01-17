@@ -1,0 +1,1 @@
+1 error occurred: /workspace/policies/opa/kafka-topics.rego:231: rego_recursion_error: rule data.kafka.topics.to_number is recursive: data.kafka.topics.to_number -> data.kafka.topics.to_number
