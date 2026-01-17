@@ -260,8 +260,6 @@ jobs:
 
       - name: Apply Kafka resources
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🚀 Deploying to DEV environment..."
 
           # Apply in order
@@ -273,18 +271,19 @@ jobs:
 
           if [ "${{ needs.plan.outputs.topics_changed }}" == "true" ]; then
             echo "📝 Applying topic changes..."
-            kubectl apply -f platform/topics/
+            kubectl apply -f platform/topics/payments/ -n kafka
+            kubectl apply -f platform/topics/ledger/ -n kafka
+            kubectl apply -f platform/topics/notifications/ -n kafka
+            kubectl apply -f platform/topics/audit/ -n kafka
           fi
 
           if [ "${{ needs.plan.outputs.users_changed }}" == "true" ]; then
             echo "👤 Applying user changes..."
-            kubectl apply -f platform/kafka/users/
+            kubectl apply -f platform/kafka/users/ -n kafka
           fi
 
       - name: Verify deployment
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "✅ Verifying deployment..."
 
           # Wait for broker pods
@@ -346,15 +345,13 @@ jobs:
       - name: Canary Deployment - 10%
         if: steps.check-config.outputs.configured == 'true'
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🐤 Starting canary deployment (10% traffic)..."
 
           # Label one broker for canary
-          kubectl label pod fintech-kafka-kafka-0 -n kafka canary=true --overwrite
+          kubectl label pod fintech-kafka-kafka-0 -n kafka canary=true --overwrite || true
 
-          # Apply changes
-          kubectl apply -f platform/topics/ -l canary=true || true
+          # Apply changes to canary (skip labeling for now, just deploy)
+          kubectl apply -f platform/topics/payments/ -n kafka || true
 
           echo "⏳ Monitoring canary for 5 minutes..."
           sleep 300
@@ -363,8 +360,6 @@ jobs:
         id: canary-check
         if: steps.check-config.outputs.configured == 'true'
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🔍 Checking canary health..."
 
           # First verify kubectl is working
@@ -409,8 +404,6 @@ jobs:
       - name: Rollback Canary on Failure
         if: failure()
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🔄 Rolling back canary..."
           
           # Check if rollback snapshot exists
@@ -427,21 +420,20 @@ jobs:
           echo "❌ Canary deployment failed"
 
       - name: Full Deployment - 100%
-        if: success()
+        if: success() && steps.check-config.outputs.configured == 'true'
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🚀 Canary successful - deploying to all brokers..."
 
-          kubectl apply -f platform/topics/
-          kubectl apply -f platform/kafka/users/
+          kubectl apply -f platform/topics/payments/ -n kafka
+          kubectl apply -f platform/topics/ledger/ -n kafka
+          kubectl apply -f platform/topics/notifications/ -n kafka
+          kubectl apply -f platform/topics/audit/ -n kafka
+          kubectl apply -f platform/kafka/users/ -n kafka
 
           echo "✅ Full deployment complete"
 
       - name: Post-Deployment Validation
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "✅ Running post-deployment validation..."
 
           # Check all brokers are healthy
@@ -495,8 +487,6 @@ jobs:
 
       - name: Pre-deployment checks
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🔍 Running pre-deployment checks..."
 
           # Check cluster health
@@ -510,16 +500,17 @@ jobs:
       - name: Blue-Green Deployment
         id: deploy
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🔵 Starting blue-green deployment..."
 
           # Create green environment label
           kubectl label namespace kafka environment=green --overwrite
 
           # Apply changes to green
-          kubectl apply -f platform/topics/
-          kubectl apply -f platform/kafka/users/
+          kubectl apply -f platform/topics/payments/ -n kafka
+          kubectl apply -f platform/topics/ledger/ -n kafka
+          kubectl apply -f platform/topics/notifications/ -n kafka
+          kubectl apply -f platform/topics/audit/ -n kafka
+          kubectl apply -f platform/kafka/users/ -n kafka
 
           echo "⏳ Waiting for green environment to stabilize..."
           sleep 180
@@ -535,8 +526,6 @@ jobs:
       - name: Switch traffic to Green
         if: steps.deploy.outputs.deployment_status == 'success'
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🔄 Switching traffic to green environment..."
 
           # Update service selector to point to green
@@ -547,8 +536,6 @@ jobs:
       - name: Automated Rollback on Failure
         if: failure()
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🔄 AUTOMATIC ROLLBACK INITIATED"
 
           # Check if rollback snapshot exists
@@ -589,8 +576,6 @@ jobs:
       - name: Smoke Tests
         if: success()
         run: |
-          export KUBECONFIG=/tmp/kubeconfig
-
           echo "🧪 Running production smoke tests..."
 
           # Test producer
