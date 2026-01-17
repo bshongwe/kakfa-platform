@@ -3,6 +3,9 @@ import { z } from 'zod';
 
 dotenv.config();
 
+// SASL mechanism types for type safety
+type SASLMechanism = 'scram-sha-256' | 'scram-sha-512';
+
 const ConfigSchema = z.object({
   port: z.number().min(1).max(65535).default(3000),
   nodeEnv: z.enum(['development', 'staging', 'production']).default('production'),
@@ -15,7 +18,10 @@ const ConfigSchema = z.object({
     clientId: z.string(),
     groupId: z.string(),
     sasl: z.object({
-      mechanism: z.enum(['SCRAM-SHA-256', 'SCRAM-SHA-512']).transform(val => val.toLowerCase() as 'scram-sha-256' | 'scram-sha-512'),
+      mechanism: z.string().refine((val): val is SASLMechanism => {
+        const normalized = val.toLowerCase();
+        return normalized === 'scram-sha-256' || normalized === 'scram-sha-512';
+      }).transform((val) => val.toLowerCase() as SASLMechanism),
       username: z.string(),
       password: z.string(),
     }),
