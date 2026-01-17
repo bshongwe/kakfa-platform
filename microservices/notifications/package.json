@@ -1,7 +1,7 @@
 {
-  "name": "@kakfa-platform/payments-service",
+  "name": "@kakfa-platform/notifications-service",
   "version": "1.0.0",
-  "description": "Payment processing microservice with Kafka integration",
+  "description": "Notification service microservice with Kafka integration",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -17,7 +17,7 @@
   },
   "keywords": [
     "kafka",
-    "payments",
+    "notifications",
     "microservice",
     "event-driven"
   ],

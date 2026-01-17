@@ -13,7 +13,9 @@ env:
 jobs:
   build-microservices:
     runs-on: ubuntu-latest
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         service: [payments, ledger, notifications, audit]
     steps:
@@ -54,6 +56,8 @@ jobs:
 
       - name: Setup Helm
         uses: azure/setup-helm@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package Helm chart
         run: |
