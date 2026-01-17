@@ -1,0 +1,75 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: notifications.email
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    domain: notifications
+    type: queue
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    # 7 days retention
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 2
+    compression.type: snappy
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: notifications.sms
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    domain: notifications
+    type: queue
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    # 7 days retention
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 2
+    compression.type: snappy
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: notifications.push
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    domain: notifications
+    type: queue
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    # 3 days retention
+    retention.ms: 259200000
+    cleanup.policy: delete
+    min.insync.replicas: 2
+    compression.type: snappy
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: notifications.audit
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    domain: notifications
+    type: audit
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    # 90 days retention for audit
+    retention.ms: 7776000000
+    cleanup.policy: delete
+    min.insync.replicas: 2
+    compression.type: snappy
