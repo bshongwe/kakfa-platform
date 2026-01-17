@@ -2,6 +2,71 @@
 # Chaos Experiment: Kill Kafka Controller
 # Expected Outcome: No data loss, new controller elected
 ---
+# ServiceAccount for chaos experiment
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaos-controller-experiment
+  namespace: chaos-testing
+
+---
+# Role for accessing Kafka pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaos-controller-experiment
+  namespace: kafka
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["patch", "update"]
+
+---
+# RoleBinding for chaos-testing namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaos-controller-experiment
+  namespace: kafka
+subjects:
+  - kind: ServiceAccount
+    name: chaos-controller-experiment
+    namespace: chaos-testing
+roleRef:
+  kind: Role
+  name: chaos-controller-experiment
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole for cross-namespace operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaos-controller-experiment
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaos-controller-experiment
+subjects:
+  - kind: ServiceAccount
+    name: chaos-controller-experiment
+    namespace: chaos-testing
+roleRef:
+  kind: ClusterRole
+  name: chaos-controller-experiment
+  apiGroup: rbac.authorization.k8s.io
+
+---
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
@@ -40,11 +105,34 @@ metadata:
   namespace: chaos-testing
 spec:
   template:
+    metadata:
+      labels:
+        app: chaos-controller-experiment
     spec:
-      serviceAccountName: chaos-operator
+      serviceAccountName: chaos-controller-experiment
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: identify
-          image: bitnami/kubectl:latest
+          image: bitnami/kubectl:1.28.4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+              ephemeral-storage: "100Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+              ephemeral-storage: "200Mi"
           command:
             - sh
             - -c
