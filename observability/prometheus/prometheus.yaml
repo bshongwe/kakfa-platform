@@ -1,3 +1,70 @@
+---
+# ServiceAccount for Prometheus
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+---
+# ClusterRole for Prometheus - needs cluster-wide read access for service discovery
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    verbs: ["get"]
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+# ClusterRoleBinding to bind ServiceAccount to ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+---
+# PersistentVolumeClaim for Prometheus time-series data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-storage
+  namespace: monitoring
+  labels:
+    app: prometheus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi  # 15 days retention with moderate traffic
+  storageClassName: standard  # Adjust based on your cluster
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,27 +77,44 @@ data:
       evaluation_interval: 15s
     
     scrape_configs:
-      # Kafka metrics
+      # Kafka metrics (updated to match cluster name: fintech-kafka)
       - job_name: 'kafka'
         static_configs:
           - targets:
-            - 'kafka-cluster-kafka-0.kafka-cluster-kafka-brokers:9404'
-            - 'kafka-cluster-kafka-1.kafka-cluster-kafka-brokers:9404'
-            - 'kafka-cluster-kafka-2.kafka-cluster-kafka-brokers:9404'
+            - 'fintech-kafka-kafka-0.fintech-kafka-kafka-brokers.kafka.svc.cluster.local:9404'
+            - 'fintech-kafka-kafka-1.fintech-kafka-kafka-brokers.kafka.svc.cluster.local:9404'
+            - 'fintech-kafka-kafka-2.fintech-kafka-kafka-brokers.kafka.svc.cluster.local:9404'
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: instance
+            regex: '([^:]+).*'
+            replacement: '${1}'
       
       # Zookeeper metrics
       - job_name: 'zookeeper'
         static_configs:
           - targets:
-            - 'kafka-cluster-zookeeper-0.kafka-cluster-zookeeper-nodes:9404'
-            - 'kafka-cluster-zookeeper-1.kafka-cluster-zookeeper-nodes:9404'
-            - 'kafka-cluster-zookeeper-2.kafka-cluster-zookeeper-nodes:9404'
+            - 'fintech-kafka-zookeeper-0.fintech-kafka-zookeeper-nodes.kafka.svc.cluster.local:9404'
+            - 'fintech-kafka-zookeeper-1.fintech-kafka-zookeeper-nodes.kafka.svc.cluster.local:9404'
+            - 'fintech-kafka-zookeeper-2.fintech-kafka-zookeeper-nodes.kafka.svc.cluster.local:9404'
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: instance
+            regex: '([^:]+).*'
+            replacement: '${1}'
       
       # Kafka Exporter
       - job_name: 'kafka-exporter'
         static_configs:
           - targets:
-            - 'kafka-cluster-kafka-exporter:9308'
+            - 'fintech-kafka-kafka-exporter.kafka.svc.cluster.local:9308'
+      
+      # Schema Registry metrics
+      - job_name: 'schema-registry'
+        static_configs:
+          - targets:
+            - 'schema-registry.kafka.svc.cluster.local:8081'
+        metrics_path: '/metrics'
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -47,6 +131,11 @@ spec:
       labels:
         app: prometheus
     spec:
+      serviceAccountName: prometheus  # Bind ServiceAccount
+      securityContext:
+        fsGroup: 65534  # Prometheus user group
+        runAsNonRoot: true
+        runAsUser: 65534  # Prometheus user (nobody)
       containers:
         - name: prometheus
           image: prom/prometheus:v2.48.0
@@ -61,13 +150,23 @@ spec:
               mountPath: /etc/prometheus
             - name: prometheus-storage
               mountPath: /prometheus
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: "2Gi"
               cpu: "500m"
+              ephemeral-storage: "2Gi"  # WAL and query processing
             limits:
               memory: "4Gi"
               cpu: "1"
+              ephemeral-storage: "5Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
       volumes:
         - name: prometheus-config
           configMap:
@@ -75,6 +174,8 @@ spec:
         - name: prometheus-storage
           persistentVolumeClaim:
             claimName: prometheus-storage
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
