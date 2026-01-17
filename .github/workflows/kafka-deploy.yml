@@ -249,9 +249,12 @@ jobs:
           fi
           echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > /tmp/kubeconfig
           chmod 600 /tmp/kubeconfig
-          export KUBECONFIG=/tmp/kubeconfig
+          
+          # Set KUBECONFIG for all subsequent steps
+          echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
           
           # Verify connection
+          export KUBECONFIG=/tmp/kubeconfig
           kubectl cluster-info --request-timeout=10s
           kubectl get nodes --request-timeout=10s
 
@@ -325,9 +328,12 @@ jobs:
         run: |
           echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > /tmp/kubeconfig
           chmod 600 /tmp/kubeconfig
-          export KUBECONFIG=/tmp/kubeconfig
+          
+          # Set KUBECONFIG for all subsequent steps
+          echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
           
           # Verify connection
+          export KUBECONFIG=/tmp/kubeconfig
           kubectl cluster-info --request-timeout=10s
           kubectl get nodes --request-timeout=10s
 
@@ -473,9 +479,12 @@ jobs:
           fi
           echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > /tmp/kubeconfig
           chmod 600 /tmp/kubeconfig
-          export KUBECONFIG=/tmp/kubeconfig
+          
+          # Set KUBECONFIG for all subsequent steps
+          echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
           
           # Verify connection
+          export KUBECONFIG=/tmp/kubeconfig
           kubectl cluster-info --request-timeout=10s
           kubectl get nodes --request-timeout=10s
 
