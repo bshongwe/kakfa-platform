@@ -1,0 +1,81 @@
+{
+  "namespace": "com.fintech.ledger.v1",
+  "type": "record",
+  "name": "LedgerTransaction",
+  "doc": "Double-entry ledger transaction",
+  "fields": [
+    {
+      "name": "transactionId",
+      "type": "string",
+      "doc": "Unique transaction identifier (UUID)"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis"
+    },
+    {
+      "name": "effectiveDate",
+      "type": "int",
+      "logicalType": "date",
+      "doc": "Effective date of transaction"
+    },
+    {
+      "name": "transactionType",
+      "type": {
+        "type": "enum",
+        "name": "TransactionType",
+        "symbols": [
+          "DEBIT",
+          "CREDIT",
+          "TRANSFER",
+          "ADJUSTMENT",
+          "FEE",
+          "REVERSAL"
+        ]
+      }
+    },
+    {
+      "name": "entries",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "LedgerEntry",
+          "fields": [
+            {"name": "accountId", "type": "string"},
+            {"name": "entryType", "type": {"type": "enum", "name": "EntryType", "symbols": ["DEBIT", "CREDIT"]}},
+            {"name": "amount", "type": "long"},
+            {"name": "currency", "type": "string"},
+            {"name": "balance", "type": "long", "doc": "Account balance after this entry"}
+          ]
+        }
+      },
+      "doc": "Ledger entries (must balance to zero)"
+    },
+    {
+      "name": "reference",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "External reference (payment ID, etc.)"
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "doc": "Transaction description"
+    },
+    {
+      "name": "metadata",
+      "type": {
+        "type": "map",
+        "values": "string"
+      },
+      "default": {}
+    },
+    {
+      "name": "createdBy",
+      "type": "string",
+      "doc": "User or service that created the transaction"
+    }
+  ]
+}

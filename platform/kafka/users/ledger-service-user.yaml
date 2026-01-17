@@ -1,0 +1,223 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: ledger-service
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: fintech-kafka
+    domain: ledger
+    service: ledger-service
+spec:
+  # TLS client authentication
+  authentication:
+    type: tls
+  
+  # Authorization with ACLs
+  authorization:
+    type: simple
+    acls:
+      # ==========================================
+      # PRODUCER PERMISSIONS - Ledger Topics
+      # ==========================================
+      
+      # Produce to ledger transactions topic
+      - resource:
+          type: topic
+          name: ledger.transactions
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # Produce to ledger balances topic
+      - resource:
+          type: topic
+          name: ledger.balances
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # Produce to ledger reconciliation topic
+      - resource:
+          type: topic
+          name: ledger.reconciliation
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # Produce to ledger snapshots topic
+      - resource:
+          type: topic
+          name: ledger.snapshots
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # ==========================================
+      # CONSUMER PERMISSIONS - Ledger Topics
+      # ==========================================
+      
+      # Consume from ledger transactions (for event sourcing replay)
+      - resource:
+          type: topic
+          name: ledger.transactions
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consume from ledger balances (for compacted state)
+      - resource:
+          type: topic
+          name: ledger.balances
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consume from ledger snapshots (for fast recovery)
+      - resource:
+          type: topic
+          name: ledger.snapshots
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consumer group for ledger service
+      - resource:
+          type: group
+          name: ledger-service
+        operations:
+          - Read
+        host: "*"
+      
+      # Consumer group for balance calculator
+      - resource:
+          type: group
+          name: ledger-service-balance-calculator
+        operations:
+          - Read
+        host: "*"
+      
+      # Consumer group for reconciliation engine
+      - resource:
+          type: group
+          name: ledger-service-reconciliation
+        operations:
+          - Read
+        host: "*"
+      
+      # ==========================================
+      # CROSS-DOMAIN PERMISSIONS
+      # ==========================================
+      
+      # Consume from payments events (trigger ledger entries)
+      - resource:
+          type: topic
+          name: payments.events
+        operations:
+          - Read
+          - Describe
+        host: "*"
+      
+      # Consumer group for payment event processing
+      - resource:
+          type: group
+          name: ledger-service-payment-events
+        operations:
+          - Read
+        host: "*"
+      
+      # Produce to audit events (for compliance)
+      - resource:
+          type: topic
+          name: audit.events
+        operations:
+          - Write
+          - Describe
+        host: "*"
+      
+      # ==========================================
+      # TRANSACTIONAL PERMISSIONS (for exactly-once)
+      # ==========================================
+      
+      # Transactional ID for double-entry atomicity
+      - resource:
+          type: transactionalId
+          name: ledger-service
+          patternType: prefix
+        operations:
+          - Describe
+          - Write
+        host: "*"
+  
+  # Resource quotas (higher for ledger due to double-entry volume)
+  quotas:
+    producerByteRate: 20971520  # 20 MB/s
+    consumerByteRate: 20971520  # 20 MB/s
+    requestPercentage: 60       # 60% of broker CPU time
+    controllerMutationRate: 10  # 10 mutations/sec
+
+---
+# ConfigMap for client configuration template
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ledger-service-kafka-config
+  namespace: kafka
+data:
+  application.properties: |
+    # Kafka Bootstrap Servers
+    bootstrap.servers=fintech-kafka-kafka-bootstrap:9093
+    
+    # Security Configuration
+    security.protocol=SSL
+    ssl.truststore.location=/etc/kafka-certs/ca.p12
+    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.keystore.location=/etc/kafka-certs/user.p12
+    ssl.keystore.password=${KEYSTORE_PASSWORD}
+    
+    # Producer Configuration
+    key.serializer=org.apache.kafka.common.serialization.StringSerializer
+    value.serializer=io.confluent.kafka.serializers.KafkaAvroSerializer
+    schema.registry.url=http://schema-registry:8081
+    
+    # Exactly-once semantics - CRITICAL for ledger integrity
+    enable.idempotence=true
+    acks=all
+    max.in.flight.requests.per.connection=5
+    transactional.id=ledger-service-${POD_NAME}
+    transaction.timeout.ms=900000  # 15 minutes for complex transactions
+    
+    # Performance tuning
+    batch.size=32768  # Larger batches for double-entry pairs
+    linger.ms=5       # Lower latency for financial accuracy
+    compression.type=none  # No compression for audit integrity
+    buffer.memory=67108864
+    
+    # Consumer Configuration
+    key.deserializer=org.apache.kafka.common.serialization.StringDeserializer
+    value.deserializer=io.confluent.kafka.serializers.KafkaAvroDeserializer
+    
+    # Consumer group
+    group.id=ledger-service
+    
+    # Exactly-once for consumers
+    enable.auto.commit=false
+    isolation.level=read_committed
+    
+    # Consumer tuning
+    fetch.min.bytes=1
+    fetch.max.wait.ms=100  # Lower latency for ledger updates
+    max.poll.records=100   # Smaller batches for transaction safety
+    max.poll.interval.ms=600000  # 10 minutes for complex reconciliation
+    
+    # Event Sourcing Configuration
+    auto.offset.reset=earliest  # Always replay from beginning if needed
+    
+    # Monitoring
+    metrics.recording.level=DEBUG
