@@ -1,0 +1,62 @@
+global:
+  registry: ghcr.io
+  repository: kafka-platform
+  tag: latest
+  pullPolicy: IfNotPresent
+
+microservices:
+  payments:
+    enabled: true
+    replicas: 2
+    image:
+      repository: kafka-payments
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+  ledger:
+    enabled: true
+    replicas: 2
+    image:
+      repository: kafka-ledger
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+  notifications:
+    enabled: true
+    replicas: 1
+    image:
+      repository: kafka-notifications
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+  audit:
+    enabled: true
+    replicas: 1
+    image:
+      repository: kafka-audit
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+kafka:
+  bootstrap: fintech-kafka-kafka-bootstrap:9092
+  namespace: kafka

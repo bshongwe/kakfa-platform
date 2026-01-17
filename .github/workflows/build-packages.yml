@@ -41,6 +41,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./microservices/${{ matrix.service }}
+          file: ./microservices/${{ matrix.service }}/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -56,11 +57,12 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm package ./helm/kafka-platform --version ${{ github.sha }}
+          cd helm
+          helm package kafka-platform --version 1.0.0-${{ github.sha }}
           
       - name: Upload Helm chart
         uses: actions/upload-artifact@v4
         with:
           name: kafka-platform-helm-${{ github.sha }}
-          path: "*.tgz"
+          path: "helm/*.tgz"
           retention-days: 90

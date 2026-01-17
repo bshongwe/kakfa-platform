@@ -1,0 +1,53 @@
+{{- range $service, $config := .Values.microservices }}
+{{- if $config.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $service }}-service
+  namespace: {{ $.Values.kafka.namespace }}
+  labels:
+    app: {{ $service }}-service
+    component: microservice
+spec:
+  replicas: {{ $config.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $service }}-service
+  template:
+    metadata:
+      labels:
+        app: {{ $service }}-service
+        component: microservice
+    spec:
+      containers:
+      - name: {{ $service }}
+        image: {{ $.Values.global.registry }}/{{ $.Values.global.repository }}/{{ $config.image.repository }}:{{ $.Values.global.tag }}
+        imagePullPolicy: {{ $.Values.global.pullPolicy }}
+        ports:
+        - containerPort: 3000
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: {{ $.Values.kafka.bootstrap }}
+        - name: SERVICE_NAME
+          value: {{ $service }}
+        resources:
+          {{- toYaml $config.resources | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $service }}-service
+  namespace: {{ $.Values.kafka.namespace }}
+  labels:
+    app: {{ $service }}-service
+spec:
+  selector:
+    app: {{ $service }}-service
+  ports:
+  - port: 80
+    targetPort: 3000
+    protocol: TCP
+  type: ClusterIP
+{{- end }}
+{{- end }}
