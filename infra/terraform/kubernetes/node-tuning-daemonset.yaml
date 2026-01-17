@@ -1,3 +1,46 @@
+---
+# ServiceAccount for Kafka Node Tuning DaemonSet
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kafka-node-tuning
+  namespace: kube-system
+  labels:
+    app: kafka-node-tuning
+---
+# ClusterRole for privileged node tuning operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kafka-node-tuning
+rules:
+  # Needed for privileged operations on nodes
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Security context requirements
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["privileged"]
+    verbs: ["use"]
+---
+# ClusterRoleBinding for ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kafka-node-tuning
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kafka-node-tuning
+subjects:
+  - kind: ServiceAccount
+    name: kafka-node-tuning
+    namespace: kube-system
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -13,12 +56,17 @@ spec:
     metadata:
       labels:
         name: kafka-node-tuning
+      annotations:
+        # Explain why this pod needs privileged access
+        seccomp.security.alpha.kubernetes.io/pod: "runtime/default"
     spec:
+      serviceAccountName: kafka-node-tuning  # Bind ServiceAccount
       nodeSelector:
         node-role.kubernetes.io/kafka: "true"
       hostPID: true
       hostNetwork: true
       hostIPC: true
+      priorityClassName: system-node-critical  # High priority for node tuning
       tolerations:
         # Allow running on nodes with kafka taint
         - key: workload
@@ -69,21 +117,34 @@ spec:
               echo "Keeping pod alive to maintain settings..."
               tail -f /dev/null
           securityContext:
-            privileged: true
+            privileged: true  # Required for sysctl operations
+            capabilities:
+              add:
+                - SYS_ADMIN  # Required for sysctl
+                - NET_ADMIN  # Required for network tuning
           resources:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: "100Mi"  # For logging and temp files
             limits:
               cpu: 100m
               memory: 64Mi
+              ephemeral-storage: "200Mi"
           volumeMounts:
             - name: host-limits
               mountPath: /host-limits
+            - name: host-sys
+              mountPath: /host-sys
+              readOnly: false
       volumes:
         - name: host-limits
           hostPath:
             path: /etc/security
+            type: Directory
+        - name: host-sys
+          hostPath:
+            path: /sys
             type: Directory
 ---
 # Optional: Create a ConfigMap with tuning documentation
