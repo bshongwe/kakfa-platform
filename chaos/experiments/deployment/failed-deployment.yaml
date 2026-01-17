@@ -1,0 +1,311 @@
+---
+# Chaos Experiment: Failed Deployment Simulation
+# Simulates various deployment failure scenarios and validates rollback procedures
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: failed-deployment-simulation
+  namespace: chaos-testing
+spec:
+  entry: deployment-failure-scenarios
+  templates:
+    # ============================================
+    # MAIN WORKFLOW
+    # ============================================
+    - name: deployment-failure-scenarios
+      templateType: Serial
+      deadline: 30m
+      children:
+        - setup-baseline
+        - scenario-bad-topic-config
+        - validate-rollback
+        - scenario-incompatible-schema
+        - validate-rollback
+        - scenario-invalid-acls
+        - validate-rollback
+        - cleanup
+
+    # ============================================
+    # SETUP: Create Baseline Snapshot
+    # ============================================
+    - name: setup-baseline
+      templateType: Task
+      deadline: 5m
+      task:
+        container:
+          name: snapshot
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "📸 Creating baseline snapshot..."
+              
+              mkdir -p /tmp/chaos-baseline
+              
+              kubectl get kafkatopic -n kafka -o yaml > /tmp/chaos-baseline/topics.yaml
+              kubectl get kafkauser -n kafka -o yaml > /tmp/chaos-baseline/users.yaml
+              kubectl get kafka -n kafka -o yaml > /tmp/chaos-baseline/cluster.yaml
+              
+              echo "✅ Baseline snapshot created"
+              ls -lh /tmp/chaos-baseline/
+
+    # ============================================
+    # SCENARIO 1: Bad Topic Configuration
+    # ============================================
+    - name: scenario-bad-topic-config
+      templateType: Serial
+      deadline: 10m
+      children:
+        - inject-bad-topic
+        - wait-for-detection
+        - trigger-rollback
+
+    - name: inject-bad-topic
+      templateType: Task
+      deadline: 2m
+      task:
+        container:
+          name: inject
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "💥 Injecting bad topic configuration..."
+              
+              cat <<EOF | kubectl apply -f -
+              apiVersion: kafka.strimzi.io/v1beta2
+              kind: KafkaTopic
+              metadata:
+                name: chaos.bad-topic
+                namespace: kafka
+                labels:
+                  strimzi.io/cluster: fintech-kafka
+                  chaos-experiment: "failed-deployment"
+              spec:
+                partitions: 100  # BAD: Exceeds limit of 50
+                replicas: 1      # BAD: Should be 3
+                config:
+                  retention.ms: "86400000"
+                  min.insync.replicas: "1"  # BAD: Should be 2
+              EOF
+              
+              echo "✅ Bad topic configuration applied"
+
+    - name: wait-for-detection
+      templateType: Suspend
+      deadline: 2m
+      duration: 30s
+
+    - name: trigger-rollback
+      templateType: Task
+      deadline: 3m
+      task:
+        container:
+          name: rollback
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "🔄 Triggering rollback..."
+              
+              # Delete bad topic
+              kubectl delete kafkatopic chaos.bad-topic -n kafka --ignore-not-found
+              
+              # Restore from baseline
+              kubectl apply -f /tmp/chaos-baseline/topics.yaml
+              
+              echo "✅ Rollback triggered"
+
+    # ============================================
+    # SCENARIO 2: Incompatible Schema Change
+    # ============================================
+    - name: scenario-incompatible-schema
+      templateType: Serial
+      deadline: 10m
+      children:
+        - inject-bad-schema
+        - wait-for-detection
+        - trigger-rollback
+
+    - name: inject-bad-schema
+      templateType: Task
+      deadline: 2m
+      task:
+        container:
+          name: inject-schema
+          image: confluentinc/cp-schema-registry:7.5.0
+          env:
+            - name: SCHEMA_REGISTRY_HOST
+              value: "schema-registry.kafka.svc.cluster.local:8081"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "💥 Injecting incompatible schema..."
+              
+              # Register incompatible schema (breaks backward compatibility)
+              curl -X POST http://${SCHEMA_REGISTRY_HOST}/subjects/chaos-topic-value/versions \
+                -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+                -d '{
+                  "schema": "{\"type\":\"record\",\"name\":\"BadSchema\",\"fields\":[{\"name\":\"id\",\"type\":\"int\"}]}"
+                }'
+              
+              echo "✅ Incompatible schema registered"
+
+    # ============================================
+    # SCENARIO 3: Invalid ACL Configuration
+    # ============================================
+    - name: scenario-invalid-acls
+      templateType: Serial
+      deadline: 10m
+      children:
+        - inject-bad-acls
+        - wait-for-detection
+        - trigger-rollback
+
+    - name: inject-bad-acls
+      templateType: Task
+      deadline: 2m
+      task:
+        container:
+          name: inject-acls
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "💥 Injecting bad ACL configuration..."
+              
+              cat <<EOF | kubectl apply -f -
+              apiVersion: kafka.strimzi.io/v1beta2
+              kind: KafkaUser
+              metadata:
+                name: chaos-bad-user
+                namespace: kafka
+                labels:
+                  strimzi.io/cluster: fintech-kafka
+                  chaos-experiment: "failed-deployment"
+              spec:
+                authentication:
+                  type: tls
+                authorization:
+                  type: simple
+                  acls:
+                    # BAD: Wildcard access (violates OPA policy)
+                    - resource:
+                        type: topic
+                        name: "*"
+                        patternType: literal
+                      operations:
+                        - Read
+                        - Write
+                    # BAD: Delete operation
+                    - resource:
+                        type: topic
+                        name: "payments.commands"
+                        patternType: literal
+                      operations:
+                        - Delete
+              EOF
+              
+              echo "✅ Bad ACL configuration applied"
+
+    # ============================================
+    # VALIDATION: Verify Rollback Success
+    # ============================================
+    - name: validate-rollback
+      templateType: Task
+      deadline: 5m
+      task:
+        container:
+          name: validate
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "✅ Validating rollback..."
+              
+              # Check no chaos resources exist
+              CHAOS_TOPICS=$(kubectl get kafkatopic -n kafka -l chaos-experiment=failed-deployment --no-headers | wc -l || echo 0)
+              CHAOS_USERS=$(kubectl get kafkauser -n kafka -l chaos-experiment=failed-deployment --no-headers | wc -l || echo 0)
+              
+              if [ "$CHAOS_TOPICS" -eq 0 ] && [ "$CHAOS_USERS" -eq 0 ]; then
+                echo "✅ Rollback successful - no chaos resources found"
+              else
+                echo "❌ Rollback failed - chaos resources still exist"
+                echo "Topics: $CHAOS_TOPICS"
+                echo "Users: $CHAOS_USERS"
+                exit 1
+              fi
+              
+              # Check brokers are healthy
+              READY_BROKERS=$(kubectl get pods -n kafka -l strimzi.io/name=fintech-kafka-kafka --field-selector=status.phase=Running --no-headers | wc -l)
+              
+              if [ "$READY_BROKERS" -eq 3 ]; then
+                echo "✅ All 3 brokers are healthy"
+              else
+                echo "❌ Only $READY_BROKERS/3 brokers are healthy"
+                exit 1
+              fi
+              
+              echo "✅ Validation passed"
+
+    # ============================================
+    # CLEANUP
+    # ============================================
+    - name: cleanup
+      templateType: Task
+      deadline: 3m
+      task:
+        container:
+          name: cleanup
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "🧹 Cleaning up chaos resources..."
+              
+              kubectl delete kafkatopic -n kafka -l chaos-experiment=failed-deployment --ignore-not-found
+              kubectl delete kafkauser -n kafka -l chaos-experiment=failed-deployment --ignore-not-found
+              
+              echo "✅ Cleanup complete"
+
+---
+# Validation ConfigMap - Metrics to Check
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deployment-failure-validation
+  namespace: chaos-testing
+data:
+  validation-queries.yaml: |
+    # Prometheus queries to validate rollback
+    queries:
+      - name: topic_count
+        query: 'count(kafka_topic_partitions{topic!~"chaos.*"})'
+        expected: "16"  # Should match baseline
+
+      - name: under_replicated_partitions
+        query: 'sum(kafka_server_replicamanager_underreplicatedpartitions)'
+        expected: "0"
+
+      - name: broker_availability
+        query: 'count(up{job="kafka"} == 1)'
+        expected: "3"
+
+      - name: failed_produce_requests
+        query: 'rate(kafka_server_brokertopicmetrics_failedproducerequestspersec[5m])'
+        expected: "0"
+
+  rollback-sla.yaml: |
+    # Service Level Agreements for Rollback
+    sla:
+      max_rollback_time: 300s  # 5 minutes
+      max_data_loss: 0         # Zero data loss
+      max_downtime: 60s        # 1 minute
+      min_broker_availability: 3  # All brokers must stay up
