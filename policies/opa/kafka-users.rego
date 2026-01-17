@@ -8,7 +8,7 @@ package kafka.users
 # ============================================
 
 # Rule: User names must follow service-name pattern
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     user_name := input.metadata.name
     not regex.match(`^[a-z]+-service$`, user_name)
@@ -20,7 +20,7 @@ deny[msg] {
 # ============================================
 
 # Rule: All users must use TLS authentication
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     auth_type := input.spec.authentication.type
     auth_type != "tls"
@@ -28,7 +28,7 @@ deny[msg] {
 }
 
 # Rule: Production users must not use SCRAM-SHA-256 (enforce mTLS)
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     input.metadata.labels.environment == "production"
     auth_type := input.spec.authentication.type
@@ -41,7 +41,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Users must not have wildcard topic permissions
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.resource.type == "topic"
@@ -50,7 +50,7 @@ deny[msg] {
 }
 
 # Rule: Only audit service can read from all topics
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     input.metadata.name != "audit-service"
     acl := input.spec.authorization.acls[_]
@@ -61,7 +61,7 @@ deny[msg] {
 }
 
 # Rule: Write permissions require explicit justification
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.operation == "Write"
@@ -70,7 +70,7 @@ deny[msg] {
 }
 
 # Rule: Delete operation should never be granted
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.operation == "Delete"
@@ -78,7 +78,7 @@ deny[msg] {
 }
 
 # Rule: Alter operation should be restricted
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.operation == "Alter"
@@ -91,7 +91,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Production users must have quotas
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     input.metadata.labels.environment == "production"
     not input.spec.quotas
@@ -99,7 +99,7 @@ deny[msg] {
 }
 
 # Rule: Producer quota must not exceed 50 MB/s
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     producer_quota := input.spec.quotas.producerByteRate
     producer_quota > 52428800  # 50 MB/s in bytes
@@ -107,7 +107,7 @@ deny[msg] {
 }
 
 # Rule: Consumer quota must not exceed 100 MB/s
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     consumer_quota := input.spec.quotas.consumerByteRate
     consumer_quota > 104857600  # 100 MB/s in bytes
@@ -115,7 +115,7 @@ deny[msg] {
 }
 
 # Rule: Request quota must be set
-warn[msg] {
+warn contains msg if {
     input.kind == "KafkaUser"
     not input.spec.quotas.requestPercentage
     msg := sprintf("User '%s' should set requestPercentage quota (recommended: 50-100)", [input.metadata.name])
@@ -126,7 +126,7 @@ warn[msg] {
 # ============================================
 
 # Rule: Consumer group must match service name
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.resource.type == "group"
@@ -137,7 +137,7 @@ deny[msg] {
 }
 
 # Rule: Wildcard consumer groups not allowed
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.resource.type == "group"
@@ -150,7 +150,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Transactional.id must match service name
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.resource.type == "transactionalId"
@@ -161,7 +161,7 @@ deny[msg] {
 }
 
 # Rule: Only approved services can use transactions
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.resource.type == "transactionalId"
@@ -174,7 +174,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Users must have required labels
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     required_labels := {"team", "service", "environment"}
     missing := {label | required_labels[label]; not input.metadata.labels[label]}
@@ -183,7 +183,7 @@ deny[msg] {
 }
 
 # Rule: Service label must match username
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     service := input.metadata.labels.service
     user_name := input.metadata.name
@@ -196,7 +196,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Users can only access their domain topics
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     user_domain := input.metadata.labels.domain
     acl := input.spec.authorization.acls[_]
@@ -216,12 +216,12 @@ deny[msg] {
 }
 
 # Define allowed cross-domain access
-cross_domain_allowed(from_domain, to_domain) {
+cross_domain_allowed(from_domain, to_domain) if {
     from_domain == "ledger"
     to_domain == "payments"
 }
 
-cross_domain_allowed(from_domain, to_domain) {
+cross_domain_allowed(from_domain, to_domain) if {
     from_domain == "notifications"
     to_domain in {"payments", "ledger"}
 }
@@ -231,7 +231,7 @@ cross_domain_allowed(from_domain, to_domain) {
 # ============================================
 
 # Rule: Production users must have annotations
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     input.metadata.labels.environment == "production"
     required_annotations := {"kafka.io/owner-email", "kafka.io/oncall-team"}
@@ -241,7 +241,7 @@ deny[msg] {
 }
 
 # Rule: Sensitive operations require approval annotation
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaUser"
     acl := input.spec.authorization.acls[_]
     acl.operation in {"Alter", "AlterConfigs", "ClusterAction"}

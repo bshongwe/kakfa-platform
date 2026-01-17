@@ -8,7 +8,7 @@ package kafka.topics
 # ============================================
 
 # Rule: Topics must follow domain.entity naming pattern
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     topic_name := input.metadata.name
     not regex.match(`^[a-z]+\.[a-z-]+$`, topic_name)
@@ -16,7 +16,7 @@ deny[msg] {
 }
 
 # Rule: Topics must not contain uppercase letters
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     topic_name := input.metadata.name
     regex.match(`[A-Z]`, topic_name)
@@ -24,7 +24,7 @@ deny[msg] {
 }
 
 # Rule: Topics must not exceed 255 characters
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     topic_name := input.metadata.name
     count(topic_name) > 255
@@ -36,7 +36,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Topics must not exceed 50 partitions (prevent over-partitioning)
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     partitions := input.spec.partitions
     partitions > 50
@@ -44,7 +44,7 @@ deny[msg] {
 }
 
 # Rule: Topics must have at least 3 partitions for production
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     partitions := input.spec.partitions
     partitions < 3
@@ -53,14 +53,14 @@ deny[msg] {
 }
 
 # Rule: Partition count must be power of 2 for optimal distribution
-warn[msg] {
+warn contains msg if {
     input.kind == "KafkaTopic"
     partitions := input.spec.partitions
     not is_power_of_two(partitions)
     msg := sprintf("Topic '%s' should use power-of-2 partitions (%d is not optimal for key distribution)", [input.metadata.name, partitions])
 }
 
-is_power_of_two(n) {
+is_power_of_two(n) if {
     n > 0
     bits.and(n, n - 1) == 0
 }
@@ -70,7 +70,7 @@ is_power_of_two(n) {
 # ============================================
 
 # Rule: Replication factor must be at least 3 for production
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     replication := input.spec.replicas
     replication < 3
@@ -79,7 +79,7 @@ deny[msg] {
 }
 
 # Rule: Replication factor must not exceed broker count
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     replication := input.spec.replicas
     replication > 3  # Assuming 3 brokers
@@ -87,7 +87,7 @@ deny[msg] {
 }
 
 # Rule: min.insync.replicas must be at least 2 for production
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     input.metadata.labels.environment == "production"
     min_isr := to_number(input.spec.config["min.insync.replicas"])
@@ -100,7 +100,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Audit topics must have at least 7 years retention
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     startswith(input.metadata.name, "audit.")
     retention_ms := to_number(input.spec.config["retention.ms"])
@@ -110,7 +110,7 @@ deny[msg] {
 }
 
 # Rule: Ledger topics must have infinite retention
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     startswith(input.metadata.name, "ledger.")
     retention_ms := to_number(input.spec.config["retention.ms"])
@@ -119,7 +119,7 @@ deny[msg] {
 }
 
 # Rule: Non-critical topics should not exceed 90 days retention (cost optimization)
-warn[msg] {
+warn contains msg if {
     input.kind == "KafkaTopic"
     not startswith(input.metadata.name, "audit.")
     not startswith(input.metadata.name, "ledger.")
@@ -134,7 +134,7 @@ warn[msg] {
 # ============================================
 
 # Rule: Audit and ledger topics must not use compression (integrity)
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     topic_is_compliance(input.metadata.name)
     compression := input.spec.config["compression.type"]
@@ -142,11 +142,11 @@ deny[msg] {
     msg := sprintf("Compliance topic '%s' must not use compression (integrity requirement)", [input.metadata.name])
 }
 
-topic_is_compliance(name) {
+topic_is_compliance(name) if {
     startswith(name, "audit.")
 }
 
-topic_is_compliance(name) {
+topic_is_compliance(name) if {
     startswith(name, "ledger.")
 }
 
@@ -155,7 +155,7 @@ topic_is_compliance(name) {
 # ============================================
 
 # Rule: Only approved domains are allowed
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     topic_name := input.metadata.name
     domain := split(topic_name, ".")[0]
@@ -168,7 +168,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Topics must have required labels
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     required_labels := {"domain", "owner", "environment"}
     missing := {label | required_labels[label]; not input.metadata.labels[label]}
@@ -177,7 +177,7 @@ deny[msg] {
 }
 
 # Rule: Owner label must be valid team
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     owner := input.metadata.labels.owner
     not owner in {"platform", "payments", "ledger", "notifications", "audit", "analytics"}
@@ -189,7 +189,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Compacted topics must have key
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     cleanup := input.spec.config["cleanup.policy"]
     cleanup == "compact"
@@ -198,7 +198,7 @@ deny[msg] {
 }
 
 # Rule: Balance topics must use log compaction
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     contains(input.metadata.name, "balance")
     cleanup := input.spec.config["cleanup.policy"]
@@ -211,7 +211,7 @@ deny[msg] {
 # ============================================
 
 # Rule: Production topics must not allow unauthenticated access
-deny[msg] {
+deny contains msg if {
     input.kind == "KafkaTopic"
     input.metadata.labels.environment == "production"
     not input.metadata.annotations["strimzi.io/acl"]
