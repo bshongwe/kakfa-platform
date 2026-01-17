@@ -114,13 +114,28 @@ jobs:
         run: |
           echo "🔐 Scanning for hardcoded secrets..."
           # Look for actual hardcoded values, not config keys or env var references
-          if grep -rE "(password|secret|apikey):\s*['\"]?[^${\s]" platform/ --include="*.yaml" | \
-             grep -vE "(password|secret|apikey):\s*\$\{" | \
+          SECRETS_FOUND=0
+          
+          # Search for password/secret/apikey followed by actual values
+          if grep -rE "(password|secret|apikey):" platform/ --include="*.yaml" | \
+             grep -vE '\$\{' | \
              grep -v "kind: Secret" | \
-             grep -v "# " | \
-             grep -v "ssl\.(truststore|keystore)\." | \
-             grep -v "resources:.*secrets"; then
-            echo "❌ Found potential hardcoded secrets!"
+             grep -v "^[[:space:]]*#" | \
+             grep -v "ssl\.(truststore|keystore)" | \
+             grep -v "resources:.*secrets" | \
+             grep -vE "(password|secret|apikey):\s*$" > /tmp/potential_secrets.txt; then
+            
+            # Check if any matches actually have values (not just keys)
+            if [ -s /tmp/potential_secrets.txt ]; then
+              cat /tmp/potential_secrets.txt
+              echo "❌ Found potential hardcoded secrets!"
+              SECRETS_FOUND=1
+            fi
+          fi
+          
+          if [ $SECRETS_FOUND -eq 0 ]; then
+            echo "✅ No hardcoded secrets found"
+          else
             exit 1
           fi
           echo "✅ No hardcoded secrets found"
