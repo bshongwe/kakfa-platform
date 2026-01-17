@@ -1,0 +1,68 @@
+---
+# Chaos Experiment: Kill Kafka Controller
+# Expected Outcome: No data loss, new controller elected
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: kill-controller
+  namespace: chaos-testing
+  annotations:
+    experiment.chaos-mesh.org/description: "Kill Kafka controller to test controller failover"
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - kafka
+    labelSelectors:
+      strimzi.io/cluster: fintech-kafka
+      strimzi.io/kind: Kafka
+    
+    # Use expression to target the current controller
+    expressionSelectors:
+      - key: controller
+        operator: In
+        values: ["true"]
+  
+  gracePeriod: 0
+  duration: "60s"
+  
+  scheduler:
+    cron: "@weekly"
+
+---
+# Pre-experiment: Identify controller
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: identify-controller
+  namespace: chaos-testing
+spec:
+  template:
+    spec:
+      serviceAccountName: chaos-operator
+      containers:
+        - name: identify
+          image: bitnami/kubectl:latest
+          command:
+            - sh
+            - -c
+            - |
+              #!/bin/sh
+              echo "Finding Kafka controller..."
+              
+              # Get controller ID
+              CONTROLLER_ID=$(kubectl exec -n kafka fintech-kafka-kafka-0 -- \
+                kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | \
+                grep "Controller" | awk '{print $NF}')
+              
+              echo "Controller ID: $CONTROLLER_ID"
+              echo "Controller broker: fintech-kafka-kafka-${CONTROLLER_ID}"
+              
+              # Label the controller pod
+              kubectl label pod "fintech-kafka-kafka-${CONTROLLER_ID}" \
+                -n kafka controller=true --overwrite
+              
+              echo "Controller labeled for chaos experiment"
+      restartPolicy: OnFailure

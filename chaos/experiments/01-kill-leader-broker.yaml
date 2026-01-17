@@ -1,0 +1,130 @@
+---
+# Chaos Experiment: Kill Leader Broker
+# Expected Outcome: Leader re-election < 10s, no data loss
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: kill-leader-broker
+  namespace: chaos-testing
+  annotations:
+    experiment.chaos-mesh.org/description: "Kill Kafka leader broker to test leader election"
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - kafka
+    labelSelectors:
+      strimzi.io/cluster: fintech-kafka
+      strimzi.io/kind: Kafka
+      strimzi.io/name: fintech-kafka-kafka
+  
+  # Kill pod and wait for recovery
+  gracePeriod: 0
+  
+  # Run experiment
+  duration: "30s"
+  
+  # Schedule for automated testing
+  scheduler:
+    cron: "@weekly"  # Every Saturday at 2 AM UTC (configured in CronJob)
+
+---
+# Monitoring for leader election
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chaos-kill-leader-metrics
+  namespace: chaos-testing
+data:
+  queries.yaml: |
+    # Queries to run during experiment
+    
+    # Leader election time
+    - name: leader_election_time
+      query: |
+        kafka_controller_stats_leader_election_rate_and_time_ms{quantile="0.99"}
+      threshold: < 10000  # 10 seconds in milliseconds
+      
+    # Under-replicated partitions
+    - name: under_replicated_partitions
+      query: |
+        kafka_server_replicamanager_underreplicatedpartitions
+      threshold: == 0  # Should return to 0 after recovery
+      
+    # ISR shrinks (should happen during failure)
+    - name: isr_shrinks
+      query: |
+        rate(kafka_server_replicamanager_isrshrinks_total[1m])
+      expected: > 0  # ISR should shrink when leader dies
+      
+    # ISR expands (should happen during recovery)
+    - name: isr_expands
+      query: |
+        rate(kafka_server_replicamanager_isrexpands_total[1m])
+      expected: > 0  # ISR should expand when new leader elected
+      
+    # Producer success rate (should remain high)
+    - name: producer_success_rate
+      query: |
+        sum(rate(kafka_producer_record_send_total{result="success"}[1m])) /
+        sum(rate(kafka_producer_record_send_total[1m]))
+      threshold: > 0.99  # 99%+ success rate
+
+---
+# Validation script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chaos-kill-leader-validation
+  namespace: chaos-testing
+data:
+  validate.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "=== Validating Kill Leader Broker Experiment ==="
+    
+    # 1. Check leader election happened
+    echo "Checking leader election..."
+    ELECTION_TIME=$(kubectl exec -n kafka fintech-kafka-kafka-0 -- \
+      kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | \
+      grep "Leader election" | awk '{print $NF}')
+    
+    if [ "$ELECTION_TIME" -lt 10000 ]; then
+      echo "✅ Leader election completed in ${ELECTION_TIME}ms (< 10s)"
+    else
+      echo "❌ Leader election took ${ELECTION_TIME}ms (> 10s threshold)"
+      exit 1
+    fi
+    
+    # 2. Check no data loss
+    echo "Checking for data loss..."
+    MESSAGES_BEFORE=/tmp/messages_before.txt
+    MESSAGES_AFTER=/tmp/messages_after.txt
+    
+    # Compare message counts
+    DIFF=$(diff $MESSAGES_BEFORE $MESSAGES_AFTER || true)
+    if [ -z "$DIFF" ]; then
+      echo "✅ No data loss detected"
+    else
+      echo "❌ Data loss detected!"
+      exit 1
+    fi
+    
+    # 3. Check ISR stability
+    echo "Checking ISR stability..."
+    UNDER_REPLICATED=$(kubectl exec -n kafka fintech-kafka-kafka-0 -- \
+      kafka-topics.sh --bootstrap-server localhost:9092 \
+      --describe --under-replicated-partitions | wc -l)
+    
+    if [ "$UNDER_REPLICATED" -eq 0 ]; then
+      echo "✅ All partitions have healthy ISR"
+    else
+      echo "❌ $UNDER_REPLICATED partitions are under-replicated"
+      exit 1
+    fi
+    
+    echo "=== Validation Complete ==="
+    echo "Result: PASSED ✅"
