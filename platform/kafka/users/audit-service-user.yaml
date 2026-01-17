@@ -1,3 +1,4 @@
+---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -11,7 +12,7 @@ spec:
   # TLS client authentication
   authentication:
     type: tls
-  
+
   # Authorization with ACLs
   authorization:
     type: simple
@@ -19,7 +20,7 @@ spec:
       # ==========================================
       # PRODUCER PERMISSIONS - Audit Topics
       # ==========================================
-      
+
       # Produce to audit events topic
       - resource:
           type: topic
@@ -28,7 +29,7 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # Produce to compliance events topic
       - resource:
           type: topic
@@ -37,7 +38,7 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # Produce to security events topic
       - resource:
           type: topic
@@ -46,7 +47,7 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # Produce to regulatory events topic
       - resource:
           type: topic
@@ -55,11 +56,11 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # ==========================================
       # CONSUMER PERMISSIONS - Audit Topics
       # ==========================================
-      
+
       # Consume from audit events (for aggregation)
       - resource:
           type: topic
@@ -68,7 +69,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consume from compliance events
       - resource:
           type: topic
@@ -77,7 +78,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consume from security events
       - resource:
           type: topic
@@ -86,7 +87,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consume from regulatory events
       - resource:
           type: topic
@@ -95,7 +96,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consumer group for audit service
       - resource:
           type: group
@@ -103,7 +104,7 @@ spec:
         operations:
           - Read
         host: "*"
-      
+
       # Consumer group for compliance reporter
       - resource:
           type: group
@@ -111,7 +112,7 @@ spec:
         operations:
           - Read
         host: "*"
-      
+
       # Consumer group for security monitor
       - resource:
           type: group
@@ -119,7 +120,7 @@ spec:
         operations:
           - Read
         host: "*"
-      
+
       # Consumer group for regulatory exporter
       - resource:
           type: group
@@ -127,11 +128,11 @@ spec:
         operations:
           - Read
         host: "*"
-      
+
       # ==========================================
       # CROSS-DOMAIN PERMISSIONS (Read-Only Monitoring)
       # ==========================================
-      
+
       # Consume from ALL payments topics (audit trail)
       - resource:
           type: topic
@@ -140,7 +141,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       - resource:
           type: topic
           name: payments.events
@@ -148,7 +149,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       - resource:
           type: topic
           name: payments.validations
@@ -156,7 +157,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       - resource:
           type: topic
           name: payments.dead-letter
@@ -164,7 +165,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consume from ALL ledger topics (financial audit)
       - resource:
           type: topic
@@ -173,7 +174,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       - resource:
           type: topic
           name: ledger.balances
@@ -181,7 +182,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       - resource:
           type: topic
           name: ledger.reconciliation
@@ -189,7 +190,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consume from ALL notification topics (delivery tracking)
       - resource:
           type: topic
@@ -198,7 +199,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       - resource:
           type: topic
           name: notifications.sms
@@ -206,7 +207,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       - resource:
           type: topic
           name: notifications.push
@@ -214,7 +215,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       - resource:
           type: topic
           name: notifications.audit
@@ -222,7 +223,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consumer groups for cross-domain monitoring
       - resource:
           type: group
@@ -230,25 +231,25 @@ spec:
         operations:
           - Read
         host: "*"
-      
+
       - resource:
           type: group
           name: audit-service-ledger-monitor
         operations:
           - Read
         host: "*"
-      
+
       - resource:
           type: group
           name: audit-service-notifications-monitor
         operations:
           - Read
         host: "*"
-      
+
       # ==========================================
       # TRANSACTIONAL PERMISSIONS
       # ==========================================
-      
+
       # Transactional ID for audit integrity
       - resource:
           type: transactionalId
@@ -258,7 +259,7 @@ spec:
           - Describe
           - Write
         host: "*"
-  
+
   # Resource quotas (highest for audit - must capture everything)
   quotas:
     producerByteRate: 20971520  # 20 MB/s
@@ -277,58 +278,58 @@ data:
   application.properties: |
     # Kafka Bootstrap Servers
     bootstrap.servers=fintech-kafka-kafka-bootstrap:9093
-    
+
     # Security Configuration
     security.protocol=SSL
     ssl.truststore.location=/etc/kafka-certs/ca.p12
     ssl.truststore.password=${TRUSTSTORE_PASSWORD}
     ssl.keystore.location=/etc/kafka-certs/user.p12
     ssl.keystore.password=${KEYSTORE_PASSWORD}
-    
+
     # Producer Configuration
     key.serializer=org.apache.kafka.common.serialization.StringSerializer
     value.serializer=io.confluent.kafka.serializers.KafkaAvroSerializer
     schema.registry.url=http://schema-registry:8081
-    
+
     # Exactly-once semantics - CRITICAL for audit integrity
     enable.idempotence=true
     acks=all
     max.in.flight.requests.per.connection=5
     transactional.id=audit-service-${POD_NAME}
-    
+
     # Performance tuning
     batch.size=32768
     linger.ms=50  # Balance between latency and throughput
     compression.type=none  # No compression for tamper-proof audit trail
     buffer.memory=67108864
-    
+
     # Consumer Configuration
     key.deserializer=org.apache.kafka.common.serialization.StringDeserializer
     value.deserializer=io.confluent.kafka.serializers.KafkaAvroDeserializer
-    
+
     # Consumer group
     group.id=audit-service
-    
+
     # Exactly-once for consumers
     enable.auto.commit=false
     isolation.level=read_committed
-    
+
     # Consumer tuning (must not miss any events)
     fetch.min.bytes=1
     fetch.max.wait.ms=100  # Low latency for real-time audit
     max.poll.records=500
     max.poll.interval.ms=300000
-    
+
     # CRITICAL: Never skip events
     auto.offset.reset=earliest
-    
+
     # Reliability
     retries=Integer.MAX_VALUE
     retry.backoff.ms=1000
-    
+
     # Monitoring
     metrics.recording.level=DEBUG
-    
+
     # Compliance Configuration
     # Note: Audit service should store ALL events for regulatory period
     # Retention handled at topic level (7-10 years)

@@ -1,3 +1,4 @@
+---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -11,7 +12,7 @@ spec:
   # TLS client authentication
   authentication:
     type: tls
-  
+
   # Authorization with ACLs
   authorization:
     type: simple
@@ -19,7 +20,7 @@ spec:
       # ==========================================
       # PRODUCER PERMISSIONS - Payments Topics
       # ==========================================
-      
+
       # Produce to payments commands topic
       - resource:
           type: topic
@@ -28,7 +29,7 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # Produce to payments events topic
       - resource:
           type: topic
@@ -37,7 +38,7 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # Produce to payments validations topic
       - resource:
           type: topic
@@ -46,7 +47,7 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # Produce to payments dead-letter topic
       - resource:
           type: topic
@@ -55,11 +56,11 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # ==========================================
       # CONSUMER PERMISSIONS - Payments Topics
       # ==========================================
-      
+
       # Consume from payments commands topic
       - resource:
           type: topic
@@ -68,7 +69,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consume from payments events topic (for saga compensation)
       - resource:
           type: topic
@@ -77,7 +78,7 @@ spec:
           - Read
           - Describe
         host: "*"
-      
+
       # Consumer group for payments service
       - resource:
           type: group
@@ -85,7 +86,7 @@ spec:
         operations:
           - Read
         host: "*"
-      
+
       # Consumer group for payment processors (scaling)
       - resource:
           type: group
@@ -93,11 +94,11 @@ spec:
         operations:
           - Read
         host: "*"
-      
+
       # ==========================================
       # CROSS-DOMAIN PERMISSIONS
       # ==========================================
-      
+
       # Produce to audit events (for compliance)
       - resource:
           type: topic
@@ -106,11 +107,11 @@ spec:
           - Write
           - Describe
         host: "*"
-      
+
       # ==========================================
       # TRANSACTIONAL PERMISSIONS (for exactly-once)
       # ==========================================
-      
+
       # Transactional ID for exactly-once semantics
       - resource:
           type: transactionalId
@@ -120,14 +121,14 @@ spec:
           - Describe
           - Write
         host: "*"
-      
-      # ==========================================
-      # SCHEMA REGISTRY INTEGRATION
-      # ==========================================
-      
-      # Note: Schema Registry uses separate auth
-      # These ACLs are for Kafka-only permissions
-  
+
+  # ==========================================
+  # SCHEMA REGISTRY INTEGRATION
+  # ==========================================
+
+  # Note: Schema Registry uses separate auth
+  # These ACLs are for Kafka-only permissions
+
   # Resource quotas
   quotas:
     producerByteRate: 10485760  # 10 MB/s
@@ -146,47 +147,47 @@ data:
   application.properties: |
     # Kafka Bootstrap Servers
     bootstrap.servers=fintech-kafka-kafka-bootstrap:9093
-    
+
     # Security Configuration
     security.protocol=SSL
     ssl.truststore.location=/etc/kafka-certs/ca.p12
     ssl.truststore.password=${TRUSTSTORE_PASSWORD}
     ssl.keystore.location=/etc/kafka-certs/user.p12
     ssl.keystore.password=${KEYSTORE_PASSWORD}
-    
+
     # Producer Configuration
     key.serializer=org.apache.kafka.common.serialization.StringSerializer
     value.serializer=io.confluent.kafka.serializers.KafkaAvroSerializer
     schema.registry.url=http://schema-registry:8081
-    
+
     # Exactly-once semantics (Phase B)
     enable.idempotence=true
     acks=all
     max.in.flight.requests.per.connection=5
     transactional.id=payments-service-${POD_NAME}
-    
+
     # Performance tuning
     batch.size=16384
     linger.ms=10
     compression.type=snappy
     buffer.memory=33554432
-    
+
     # Consumer Configuration
     key.deserializer=org.apache.kafka.common.serialization.StringDeserializer
     value.deserializer=io.confluent.kafka.serializers.KafkaAvroDeserializer
-    
+
     # Consumer group
     group.id=payments-service
-    
+
     # Exactly-once for consumers
     enable.auto.commit=false
     isolation.level=read_committed
-    
+
     # Consumer tuning
     fetch.min.bytes=1
     fetch.max.wait.ms=500
     max.poll.records=500
     max.poll.interval.ms=300000
-    
+
     # Monitoring
     metrics.recording.level=DEBUG
