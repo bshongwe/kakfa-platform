@@ -230,7 +230,7 @@ jobs:
     name: Deploy to Development
     runs-on: ubuntu-latest
     needs: plan
-    if: github.ref == 'refs/heads/develop' && vars.KUBECONFIG_DEV != ''
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -240,13 +240,19 @@ jobs:
         with:
           version: ${{ env.KUBECTL_VERSION }}
 
-      - name: Configure kubectl
+      - name: Check for kubeconfig
+        id: check-config
         run: |
           if [ -z "${{ secrets.KUBECONFIG_DEV }}" ]; then
-            echo "⚠️  KUBECONFIG_DEV secret not configured"
-            echo "ℹ️  Skipping deployment - set up KUBECONFIG_DEV in repository secrets"
-            exit 1
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "⚠️  KUBECONFIG_DEV secret not configured - skipping deployment"
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Configure kubectl
+        if: steps.check-config.outputs.configured == 'true'
+        run: |
           echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > /tmp/kubeconfig
           chmod 600 /tmp/kubeconfig
           
@@ -259,6 +265,7 @@ jobs:
           kubectl get nodes --request-timeout=10s
 
       - name: Apply Kafka resources
+        if: steps.check-config.outputs.configured == 'true'
         run: |
           echo "🚀 Deploying to DEV environment..."
 
@@ -283,6 +290,7 @@ jobs:
           fi
 
       - name: Verify deployment
+        if: steps.check-config.outputs.configured == 'true'
         run: |
           echo "✅ Verifying deployment..."
 
@@ -301,7 +309,7 @@ jobs:
   deploy-staging:
     name: Deploy to Staging (Canary)
     runs-on: ubuntu-latest
-    needs: plan
+    needs: [plan, deploy-dev]
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
