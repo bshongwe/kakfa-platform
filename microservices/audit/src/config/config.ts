@@ -15,7 +15,7 @@ const ConfigSchema = z.object({
     clientId: z.string(),
     groupId: z.string(),
     sasl: z.object({
-      mechanism: z.enum(['scram-sha-256', 'scram-sha-512']),
+      mechanism: z.enum(['SCRAM-SHA-256', 'SCRAM-SHA-512']).transform(val => val.toLowerCase() as 'scram-sha-256' | 'scram-sha-512'),
       username: z.string(),
       password: z.string(),
     }),
@@ -46,7 +46,7 @@ function loadConfig(): Config {
       clientId: process.env.KAFKA_CLIENT_ID || 'payments-service',
       groupId: process.env.KAFKA_GROUP_ID || 'payments-service-group',
       sasl: {
-        mechanism: process.env.KAFKA_SASL_MECHANISM?.toLowerCase() || 'scram-sha-512',
+        mechanism: process.env.KAFKA_SASL_MECHANISM || 'SCRAM-SHA-512',
         username: process.env.KAFKA_SASL_USERNAME || '',
         password: process.env.KAFKA_SASL_PASSWORD || '',
       },
