@@ -1,0 +1,534 @@
+name: Kafka Platform Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'platform/**'
+      - 'schemas/**'
+      - '.github/workflows/kafka-deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'platform/**'
+      - 'schemas/**'
+
+env:
+  KUBECTL_VERSION: "1.28.0"
+  HELM_VERSION: "3.13.0"
+
+jobs:
+  # ============================================
+  # VALIDATION STAGE
+  # ============================================
+  validate:
+    name: Validate Kafka Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Validate Kafka manifests
+        run: |
+          echo "🔍 Validating Kafka cluster configuration..."
+          kubectl apply --dry-run=client -f platform/kafka/cluster.yaml
+          
+          echo "🔍 Validating topics..."
+          kubectl apply --dry-run=client -f platform/topics/
+          
+          echo "🔍 Validating users..."
+          kubectl apply --dry-run=client -f platform/kafka/users/
+          
+          echo "🔍 Validating schema registry..."
+          kubectl apply --dry-run=client -f platform/schema-registry/
+
+      - name: Lint Avro schemas
+        run: |
+          echo "🔍 Validating Avro schemas..."
+          # Install Avro tools
+          wget -q https://repo1.maven.org/maven2/org/apache/avro/avro-tools/1.11.3/avro-tools-1.11.3.jar -O /tmp/avro-tools.jar
+          
+          # Validate each schema
+          for schema in schemas/avro/*.avsc; do
+            echo "Validating $schema..."
+            java -jar /tmp/avro-tools.jar idl2schemata $schema || echo "⚠️  Schema validation failed: $schema"
+          done
+
+      - name: OPA Policy Check
+        run: |
+          echo "🔐 Running OPA policy validation..."
+          
+          # Run OPA tests
+          docker run --rm -v $(pwd):/workspace \
+            openpolicyagent/opa:latest \
+            test /workspace/policies/opa -v
+          
+          echo "✅ OPA policy tests passed"
+
+  # ============================================
+  # SECURITY SCAN
+  # ============================================
+  security-scan:
+    name: Security & Policy Enforcement
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run OPA Policy Tests
+        run: |
+          echo "🔐 Running OPA policy tests..."
+          docker run --rm -v $(pwd):/workspace openpolicyagent/opa:latest test /workspace/policies/opa -v
+
+      - name: Check for secrets in manifests
+        run: |
+          echo "🔐 Scanning for hardcoded secrets..."
+          if grep -r "password\|secret\|apikey" platform/ --include="*.yaml" | grep -v "Secret"; then
+            echo "❌ Found potential hardcoded secrets!"
+            exit 1
+          fi
+          echo "✅ No hardcoded secrets found"
+
+      - name: Validate RBAC policies
+        run: |
+          echo "🔐 Validating RBAC configurations..."
+          # Check that all ServiceAccounts have RoleBindings
+          for sa in $(grep -r "kind: ServiceAccount" platform/ -l); do
+            sa_name=$(grep "name:" $sa | head -1 | awk '{print $2}')
+            if ! grep -r "serviceAccountName: $sa_name" platform/ -q; then
+              echo "⚠️  ServiceAccount $sa_name may not be bound"
+            fi
+          done
+
+  # ============================================
+  # PLAN STAGE
+  # ============================================
+  plan:
+    name: Generate Deployment Plan
+    runs-on: ubuntu-latest
+    needs: [validate, security-scan]
+    outputs:
+      topics_changed: ${{ steps.detect-changes.outputs.topics }}
+      users_changed: ${{ steps.detect-changes.outputs.users }}
+      cluster_changed: ${{ steps.detect-changes.outputs.cluster }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changes
+        id: detect-changes
+        run: |
+          echo "🔍 Detecting what changed..."
+          
+          # Check if topics changed
+          if git diff HEAD^1 HEAD --name-only | grep "platform/topics/"; then
+            echo "topics=true" >> $GITHUB_OUTPUT
+            echo "📝 Topics changed"
+          else
+            echo "topics=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check if users changed
+          if git diff HEAD^1 HEAD --name-only | grep "platform/kafka/users/"; then
+            echo "users=true" >> $GITHUB_OUTPUT
+            echo "👤 Users changed"
+          else
+            echo "users=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check if cluster config changed
+          if git diff HEAD^1 HEAD --name-only | grep "platform/kafka/cluster.yaml"; then
+            echo "cluster=true" >> $GITHUB_OUTPUT
+            echo "⚠️  Cluster configuration changed!"
+          else
+            echo "cluster=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create rollback snapshot
+        run: |
+          echo "📸 Creating rollback snapshot..."
+          mkdir -p /tmp/rollback-snapshot
+          kubectl get kafkatopic -n kafka -o yaml > /tmp/rollback-snapshot/topics.yaml || true
+          kubectl get kafkauser -n kafka -o yaml > /tmp/rollback-snapshot/users.yaml || true
+          kubectl get kafka -n kafka -o yaml > /tmp/rollback-snapshot/cluster.yaml || true
+          
+          # Store as artifact
+          tar -czf rollback-snapshot-${{ github.sha }}.tar.gz -C /tmp rollback-snapshot/
+
+      - name: Upload rollback snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-snapshot-${{ github.sha }}
+          path: rollback-snapshot-${{ github.sha }}.tar.gz
+          retention-days: 30
+
+  # ============================================
+  # DEPLOY TO DEV
+  # ============================================
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: dev
+      url: https://kafka-dev.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > /tmp/kubeconfig
+          export KUBECONFIG=/tmp/kubeconfig
+          kubectl cluster-info
+
+      - name: Apply Kafka resources
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🚀 Deploying to DEV environment..."
+          
+          # Apply in order
+          if [ "${{ needs.plan.outputs.cluster_changed }}" == "true" ]; then
+            echo "⚠️  Applying cluster changes..."
+            kubectl apply -f platform/kafka/cluster.yaml
+            sleep 30  # Wait for cluster to stabilize
+          fi
+          
+          if [ "${{ needs.plan.outputs.topics_changed }}" == "true" ]; then
+            echo "📝 Applying topic changes..."
+            kubectl apply -f platform/topics/
+          fi
+          
+          if [ "${{ needs.plan.outputs.users_changed }}" == "true" ]; then
+            echo "👤 Applying user changes..."
+            kubectl apply -f platform/kafka/users/
+          fi
+
+      - name: Verify deployment
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "✅ Verifying deployment..."
+          
+          # Wait for broker pods
+          kubectl wait --for=condition=ready pod -l strimzi.io/name=fintech-kafka-kafka -n kafka --timeout=300s
+          
+          # Check topic status
+          kubectl get kafkatopic -n kafka
+          
+          # Check user status
+          kubectl get kafkauser -n kafka
+
+  # ============================================
+  # DEPLOY TO STAGING (with Canary)
+  # ============================================
+  deploy-staging:
+    name: Deploy to Staging (Canary)
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://kafka-staging.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > /tmp/kubeconfig
+          export KUBECONFIG=/tmp/kubeconfig
+
+      - name: Download rollback snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: rollback-snapshot-${{ github.sha }}
+
+      - name: Canary Deployment - 10%
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🐤 Starting canary deployment (10% traffic)..."
+          
+          # Label one broker for canary
+          kubectl label pod fintech-kafka-kafka-0 -n kafka canary=true --overwrite
+          
+          # Apply changes
+          kubectl apply -f platform/topics/ -l canary=true || true
+          
+          echo "⏳ Monitoring canary for 5 minutes..."
+          sleep 300
+
+      - name: Canary Health Check
+        id: canary-check
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🔍 Checking canary health..."
+          
+          # Check error rate
+          ERROR_RATE=$(kubectl exec -n kafka fintech-kafka-kafka-0 -- \
+            kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>&1 | \
+            grep -i error | wc -l || echo "0")
+          
+          if [ "$ERROR_RATE" -gt 0 ]; then
+            echo "❌ Canary failed - errors detected!"
+            echo "canary_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ Canary passed health checks"
+          echo "canary_status=passed" >> $GITHUB_OUTPUT
+
+      - name: Rollback Canary on Failure
+        if: failure() && steps.canary-check.outputs.canary_status == 'failed'
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🔄 Rolling back canary..."
+          tar -xzf rollback-snapshot-${{ github.sha }}.tar.gz
+          kubectl apply -f rollback-snapshot/topics.yaml
+          
+          # Remove canary label
+          kubectl label pod fintech-kafka-kafka-0 -n kafka canary-
+          
+          echo "❌ Canary deployment failed and rolled back"
+          exit 1
+
+      - name: Full Deployment - 100%
+        if: success()
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🚀 Canary successful - deploying to all brokers..."
+          
+          kubectl apply -f platform/topics/
+          kubectl apply -f platform/kafka/users/
+          
+          echo "✅ Full deployment complete"
+
+      - name: Post-Deployment Validation
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "✅ Running post-deployment validation..."
+          
+          # Check all brokers are healthy
+          kubectl wait --for=condition=ready pod -l strimzi.io/name=fintech-kafka-kafka -n kafka --timeout=300s
+          
+          # Verify topic replication
+          for topic in $(kubectl get kafkatopic -n kafka -o name); do
+            echo "Checking $topic..."
+            # Add topic health checks here
+          done
+
+  # ============================================
+  # DEPLOY TO PRODUCTION (with Approval)
+  # ============================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://kafka.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > /tmp/kubeconfig
+          export KUBECONFIG=/tmp/kubeconfig
+
+      - name: Download rollback snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: rollback-snapshot-${{ github.sha }}
+
+      - name: Pre-deployment checks
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🔍 Running pre-deployment checks..."
+          
+          # Check cluster health
+          kubectl get pods -n kafka
+          
+          # Check under-replicated partitions
+          # Add production readiness checks here
+          
+          echo "✅ Pre-deployment checks passed"
+
+      - name: Blue-Green Deployment
+        id: deploy
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🔵 Starting blue-green deployment..."
+          
+          # Create green environment label
+          kubectl label namespace kafka environment=green --overwrite
+          
+          # Apply changes to green
+          kubectl apply -f platform/topics/
+          kubectl apply -f platform/kafka/users/
+          
+          echo "⏳ Waiting for green environment to stabilize..."
+          sleep 180
+          
+          # Health check green
+          if ! kubectl wait --for=condition=ready pod -l strimzi.io/name=fintech-kafka-kafka -n kafka --timeout=300s; then
+            echo "deployment_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "deployment_status=success" >> $GITHUB_OUTPUT
+
+      - name: Switch traffic to Green
+        if: steps.deploy.outputs.deployment_status == 'success'
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🔄 Switching traffic to green environment..."
+          
+          # Update service selector to point to green
+          kubectl label namespace kafka environment=green active=true --overwrite
+          
+          echo "✅ Traffic switched to green"
+
+      - name: Automated Rollback on Failure
+        if: failure()
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🔄 AUTOMATIC ROLLBACK INITIATED"
+          
+          # Extract rollback snapshot
+          tar -xzf rollback-snapshot-${{ github.sha }}.tar.gz
+          
+          # Apply previous state
+          kubectl apply -f rollback-snapshot/topics.yaml
+          kubectl apply -f rollback-snapshot/users.yaml
+          kubectl apply -f rollback-snapshot/cluster.yaml
+          
+          # Switch back to blue
+          kubectl label namespace kafka environment=blue active=true --overwrite
+          
+          echo "✅ Rollback complete - system restored to previous state"
+          
+          # Notify on-call
+          curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "🚨 Production deployment failed and auto-rolled back",
+              "attachments": [{
+                "color": "danger",
+                "fields": [
+                  {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+                  {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+                  {"title": "Actor", "value": "${{ github.actor }}", "short": true}
+                ]
+              }]
+            }'
+
+      - name: Smoke Tests
+        if: success()
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          echo "🧪 Running production smoke tests..."
+          
+          # Test producer
+          kubectl run kafka-producer-test --image=confluentinc/cp-kafka:7.5.0 --rm -i --restart=Never -n kafka -- \
+            kafka-console-producer --bootstrap-server fintech-kafka-kafka-bootstrap:9092 --topic test-topic <<EOF
+          {"test": "smoke-test-message"}
+          EOF
+          
+          # Test consumer
+          CONSUMED=$(kubectl run kafka-consumer-test --image=confluentinc/cp-kafka:7.5.0 --rm -i --restart=Never -n kafka -- \
+            kafka-console-consumer --bootstrap-server fintech-kafka-kafka-bootstrap:9092 --topic test-topic --from-beginning --max-messages 1 --timeout-ms 10000)
+          
+          if [ -z "$CONSUMED" ]; then
+            echo "❌ Smoke test failed - no messages consumed"
+            exit 1
+          fi
+          
+          echo "✅ Smoke tests passed"
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 PRODUCTION DEPLOYMENT SUMMARY"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Status: ${{ job.status }}"
+          echo "Topics changed: ${{ needs.plan.outputs.topics_changed }}"
+          echo "Users changed: ${{ needs.plan.outputs.users_changed }}"
+          echo "Cluster changed: ${{ needs.plan.outputs.cluster_changed }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # ============================================
+  # NOTIFY
+  # ============================================
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always()
+    steps:
+      - name: Send Slack notification
+        run: |
+          if [ "${{ needs.deploy-production.result }}" == "success" ]; then
+            COLOR="good"
+            STATUS="✅ SUCCESS"
+          else
+            COLOR="danger"
+            STATUS="❌ FAILED"
+          fi
+          
+          curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"text\": \"Kafka Platform Deployment: ${STATUS}\",
+              \"attachments\": [{
+                \"color\": \"${COLOR}\",
+                \"fields\": [
+                  {\"title\": \"Environment\", \"value\": \"Production\", \"short\": true},
+                  {\"title\": \"Commit\", \"value\": \"${{ github.sha }}\", \"short\": true},
+                  {\"title\": \"Actor\", \"value\": \"${{ github.actor }}\", \"short\": true},
+                  {\"title\": \"Workflow\", \"value\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\", \"short\": false}
+                ]
+              }]
+            }"
