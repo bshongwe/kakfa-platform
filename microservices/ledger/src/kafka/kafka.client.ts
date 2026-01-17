@@ -17,7 +17,7 @@ export class KafkaClient {
         mechanism: config.sasl.mechanism as 'scram-sha-256' | 'scram-sha-512',
         username: config.sasl.username,
         password: config.sasl.password,
-      },
+      } as const,
       ssl: true,
       logLevel: logLevel.ERROR,
       retry: {

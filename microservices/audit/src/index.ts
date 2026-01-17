@@ -4,6 +4,7 @@ import { createServer } from './server.js';
 import { AuditService } from './services/audit.service.js';
 import { KafkaClient } from './kafka/kafka.client.js';
 import { MetricsService } from './services/metrics.service.js';
+import { createServer as createHttpServer } from 'http';
 
 async function main() {
   try {
@@ -20,7 +21,9 @@ async function main() {
     const auditService = new AuditService(kafkaClient, metricsService);
     await auditService.start();
 
-    const server = createServer(kafkaClient, metricsService);
+    const app = createServer(kafkaClient, metricsService);
+    const server = createHttpServer(app);
+    
     server.listen(config.port, () => {
       logger.info(`Server listening on port ${config.port}`);
       logger.info(`Metrics available on port ${config.metricsPort}`);

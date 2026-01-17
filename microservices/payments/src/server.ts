@@ -10,7 +10,7 @@ export function createServer(kafkaClient: KafkaClient, metricsService: MetricsSe
   app.use(express.json());
 
   // Health check endpoint
-  app.get('/health', async (req, res) => {
+  app.get('/health', async (_req, res) => {
     try {
       const isHealthy = await kafkaClient.healthCheck();
       
@@ -40,7 +40,7 @@ export function createServer(kafkaClient: KafkaClient, metricsService: MetricsSe
   });
 
   // Readiness probe
-  app.get('/ready', async (req, res) => {
+  app.get('/ready', async (_req, res) => {
     try {
       const isReady = await kafkaClient.healthCheck();
       
@@ -55,12 +55,12 @@ export function createServer(kafkaClient: KafkaClient, metricsService: MetricsSe
   });
 
   // Liveness probe
-  app.get('/live', (req, res) => {
+  app.get('/live', (_req, res) => {
     res.status(200).json({ status: 'alive' });
   });
 
   // Metrics endpoint (Prometheus format)
-  app.get('/metrics', async (req, res) => {
+  app.get('/metrics', async (_req, res) => {
     try {
       res.set('Content-Type', metricsService.contentType);
       const metrics = await metricsService.getMetrics();
@@ -72,7 +72,7 @@ export function createServer(kafkaClient: KafkaClient, metricsService: MetricsSe
   });
 
   // Request logging middleware
-  app.use((req, res, next) => {
+  app.use((req, _res, next) => {
     logger.debug('HTTP request', {
       method: req.method,
       path: req.path,
