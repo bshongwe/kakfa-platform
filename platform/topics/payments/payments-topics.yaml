@@ -1,0 +1,88 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments.commands
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    domain: payments
+    type: command
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    # Retention: 7 days for commands
+    retention.ms: 604800000
+    # Compaction disabled for command log
+    cleanup.policy: delete
+    # High durability for financial transactions
+    min.insync.replicas: 2
+    # Compression for cost savings
+    compression.type: snappy
+    # Max message size: 1MB
+    max.message.bytes: 1048576
+    # Segment size: 1GB
+    segment.bytes: 1073741824
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments.events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    domain: payments
+    type: event
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    # Retention: 30 days for events (audit trail)
+    retention.ms: 2592000000
+    # Log compaction for event sourcing
+    cleanup.policy: compact
+    # Minimum time before compaction
+    min.compaction.lag.ms: 86400000  # 24 hours
+    # High durability
+    min.insync.replicas: 2
+    compression.type: snappy
+    max.message.bytes: 1048576
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments.validations
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    domain: payments
+    type: validation
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    # Retention: 3 days for validation results
+    retention.ms: 259200000
+    cleanup.policy: delete
+    min.insync.replicas: 2
+    compression.type: snappy
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments.dead-letter
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    domain: payments
+    type: dead-letter
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    # Retention: 90 days for failed messages
+    retention.ms: 7776000000
+    cleanup.policy: delete
+    # Lower ISR for DLQ (availability over consistency)
+    min.insync.replicas: 1
+    compression.type: snappy
