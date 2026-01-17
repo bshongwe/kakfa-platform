@@ -463,13 +463,19 @@ jobs:
         with:
           version: ${{ env.KUBECTL_VERSION }}
 
-      - name: Configure kubectl
+      - name: Check for kubeconfig
+        id: check-config
         run: |
           if [ -z "${{ secrets.KUBECONFIG_PROD }}" ]; then
-            echo "❌ KUBECONFIG_PROD secret not configured"
-            echo "ℹ️  Skipping deployment - set up KUBECONFIG_PROD in repository secrets"
-            exit 1
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "⚠️  KUBECONFIG_PROD secret not configured - skipping deployment"
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Configure kubectl
+        if: steps.check-config.outputs.configured == 'true'
+        run: |
           echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > /tmp/kubeconfig
           chmod 600 /tmp/kubeconfig
           
@@ -482,11 +488,13 @@ jobs:
           kubectl get nodes --request-timeout=10s
 
       - name: Download rollback snapshot
+        if: steps.check-config.outputs.configured == 'true'
         uses: actions/download-artifact@v4
         with:
           name: rollback-snapshot-${{ github.sha }}
 
       - name: Pre-deployment checks
+        if: steps.check-config.outputs.configured == 'true'
         run: |
           echo "🔍 Running pre-deployment checks..."
 
@@ -500,6 +508,7 @@ jobs:
 
       - name: Blue-Green Deployment
         id: deploy
+        if: steps.check-config.outputs.configured == 'true'
         run: |
           echo "🔵 Starting blue-green deployment..."
 
@@ -525,7 +534,7 @@ jobs:
           echo "deployment_status=success" >> $GITHUB_OUTPUT
 
       - name: Switch traffic to Green
-        if: steps.deploy.outputs.deployment_status == 'success'
+        if: steps.deploy.outputs.deployment_status == 'success' && steps.check-config.outputs.configured == 'true'
         run: |
           echo "🔄 Switching traffic to green environment..."
 
@@ -535,7 +544,7 @@ jobs:
           echo "✅ Traffic switched to green"
 
       - name: Automated Rollback on Failure
-        if: failure()
+        if: failure() && steps.check-config.outputs.configured == 'true'
         run: |
           echo "🔄 AUTOMATIC ROLLBACK INITIATED"
 
@@ -575,7 +584,7 @@ jobs:
           fi
 
       - name: Smoke Tests
-        if: success()
+        if: success() && steps.check-config.outputs.configured == 'true'
         run: |
           echo "🧪 Running production smoke tests..."
 
