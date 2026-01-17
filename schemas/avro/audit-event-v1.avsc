@@ -1,0 +1,105 @@
+{
+  "namespace": "com.fintech.audit.v1",
+  "type": "record",
+  "name": "AuditEvent",
+  "doc": "Audit trail event for compliance and security",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string",
+      "doc": "Unique audit event identifier (UUID)"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis"
+    },
+    {
+      "name": "eventType",
+      "type": {
+        "type": "enum",
+        "name": "AuditEventType",
+        "symbols": [
+          "USER_LOGIN",
+          "USER_LOGOUT",
+          "PAYMENT_CREATED",
+          "PAYMENT_APPROVED",
+          "ACCOUNT_ACCESSED",
+          "DATA_EXPORTED",
+          "CONFIG_CHANGED",
+          "SECURITY_ALERT",
+          "COMPLIANCE_CHECK",
+          "REGULATORY_REPORT"
+        ]
+      }
+    },
+    {
+      "name": "severity",
+      "type": {
+        "type": "enum",
+        "name": "SeverityLevel",
+        "symbols": ["INFO", "WARNING", "ERROR", "CRITICAL"]
+      }
+    },
+    {
+      "name": "actor",
+      "type": {
+        "type": "record",
+        "name": "Actor",
+        "fields": [
+          {"name": "userId", "type": ["null", "string"], "default": null},
+          {"name": "serviceId", "type": ["null", "string"], "default": null},
+          {"name": "ipAddress", "type": ["null", "string"], "default": null},
+          {"name": "userAgent", "type": ["null", "string"], "default": null}
+        ]
+      },
+      "doc": "Entity that performed the action"
+    },
+    {
+      "name": "resource",
+      "type": {
+        "type": "record",
+        "name": "Resource",
+        "fields": [
+          {"name": "type", "type": "string"},
+          {"name": "id", "type": "string"},
+          {"name": "name", "type": ["null", "string"], "default": null}
+        ]
+      },
+      "doc": "Resource being acted upon"
+    },
+    {
+      "name": "action",
+      "type": "string",
+      "doc": "Action performed"
+    },
+    {
+      "name": "result",
+      "type": {
+        "type": "enum",
+        "name": "ActionResult",
+        "symbols": ["SUCCESS", "FAILURE", "PARTIAL"]
+      }
+    },
+    {
+      "name": "details",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Additional details about the event"
+    },
+    {
+      "name": "metadata",
+      "type": {
+        "type": "map",
+        "values": "string"
+      },
+      "default": {}
+    },
+    {
+      "name": "correlationId",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Correlation ID for distributed tracing"
+    }
+  ]
+}
