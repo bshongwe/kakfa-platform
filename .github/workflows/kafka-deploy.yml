@@ -17,8 +17,8 @@ on:
       - 'schemas/**'
 
 env:
-  KUBECTL_VERSION: "1.28.0"
-  HELM_VERSION: "3.13.0"
+  KUBECTL_VERSION: ${{ vars.KUBECTL_VERSION || 'latest' }}
+  HELM_VERSION: ${{ vars.HELM_VERSION || 'latest' }}
 
 jobs:
   # ============================================
