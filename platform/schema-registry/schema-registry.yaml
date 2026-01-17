@@ -1,3 +1,58 @@
+---
+# ServiceAccount for Schema Registry
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: schema-registry
+  namespace: kafka
+  labels:
+    app: schema-registry
+---
+# Role for Schema Registry - read access to config maps and secrets
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: schema-registry
+  namespace: kafka
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+# RoleBinding to bind ServiceAccount to Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: schema-registry
+  namespace: kafka
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: schema-registry
+subjects:
+  - kind: ServiceAccount
+    name: schema-registry
+    namespace: kafka
+---
+# PersistentVolumeClaim for Schema Registry data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: schema-registry-data
+  namespace: kafka
+  labels:
+    app: schema-registry
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi  # Schema metadata storage
+  storageClassName: standard  # Adjust based on your cluster
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +68,7 @@ spec:
       labels:
         app: schema-registry
     spec:
+      serviceAccountName: schema-registry  # Bind ServiceAccount
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -44,20 +100,30 @@ spec:
             - name: SCHEMA_REGISTRY_HOST_NAME
               value: schema-registry
             - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
-              value: "kafka-cluster-kafka-bootstrap:9092"
+              value: "fintech-kafka-kafka-bootstrap:9092"
             - name: SCHEMA_REGISTRY_LISTENERS
               value: "http://0.0.0.0:8081"
             - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC
               value: "_schemas"
             - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR
               value: "3"
+            # Data directory for local caching
+            - name: SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL
+              value: "fintech-kafka-zookeeper-client:2181"
           resources:
             requests:
               memory: "512Mi"
               cpu: "250m"
+              ephemeral-storage: "1Gi"  # Local cache storage
             limits:
               memory: "1Gi"
               cpu: "500m"
+              ephemeral-storage: "2Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/schema-registry
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /
@@ -70,6 +136,12 @@ spec:
               port: 8081
             initialDelaySeconds: 20
             periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: schema-registry-data
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
