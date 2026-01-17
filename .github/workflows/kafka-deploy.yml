@@ -181,9 +181,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: plan
     if: github.ref == 'refs/heads/develop'
-    environment:
-      name: dev
-      url: https://kafka-dev.example.com
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -245,9 +242,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: plan
     if: github.ref == 'refs/heads/main'
-    environment:
-      name: staging
-      url: https://kafka-staging.example.com
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -353,9 +347,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-staging
     if: github.ref == 'refs/heads/main'
-    environment:
-      name: production
-      url: https://kafka.example.com
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
