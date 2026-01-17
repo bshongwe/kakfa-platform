@@ -4,6 +4,10 @@
 
 This directory contains OPA policies that enforce governance, security, and best practices for Kafka platform resources.
 
+**OPA Version**: Compatible with OPA v0.42.0+ (uses Rego v1 syntax with `if` keyword)
+
+> **Note**: These policies use modern Rego syntax introduced in OPA v0.42.0. The `if` keyword is required before rule bodies and the `contains` keyword for partial set rules.
+
 ## Policies
 
 ### 1. Topic Governance (`kafka-topics.rego`)
