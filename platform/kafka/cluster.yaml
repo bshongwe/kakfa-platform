@@ -54,6 +54,32 @@ spec:
         configMapKeyRef:
           name: kafka-metrics
           key: kafka-metrics-config.yml
+    template:
+      pod:
+        metadata:
+          labels:
+            app: kafka
+            component: broker
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/kafka
+                      operator: In
+                      values:
+                        - "true"
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app
+                        operator: In
+                        values:
+                          - kafka
+                  topologyKey: kubernetes.io/hostname
   zookeeper:
     replicas: 3
     storage:
@@ -73,6 +99,32 @@ spec:
         configMapKeyRef:
           name: kafka-metrics
           key: zookeeper-metrics-config.yml
+    template:
+      pod:
+        metadata:
+          labels:
+            app: zookeeper
+            component: zookeeper
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/kafka
+                      operator: In
+                      values:
+                        - "true"
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app
+                        operator: In
+                        values:
+                          - zookeeper
+                  topologyKey: kubernetes.io/hostname
   entityOperator:
     topicOperator:
       resources:

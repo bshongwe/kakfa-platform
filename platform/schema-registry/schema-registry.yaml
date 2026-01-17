@@ -13,6 +13,27 @@ spec:
       labels:
         app: schema-registry
     spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: node-role.kubernetes.io/kafka
+                    operator: In
+                    values:
+                      - "true"
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - schema-registry
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: schema-registry
           image: confluentinc/cp-schema-registry:7.5.0

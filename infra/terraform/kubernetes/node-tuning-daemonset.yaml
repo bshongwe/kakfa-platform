@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kafka-node-tuning
+  namespace: kube-system
+  labels:
+    app: kafka-node-tuning
+spec:
+  selector:
+    matchLabels:
+      name: kafka-node-tuning
+  template:
+    metadata:
+      labels:
+        name: kafka-node-tuning
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/kafka: "true"
+      hostPID: true
+      hostNetwork: true
+      hostIPC: true
+      tolerations:
+        # Allow running on nodes with kafka taint
+        - key: workload
+          operator: Equal
+          value: kafka
+          effect: NoSchedule
+        # Allow running on master nodes if needed
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: tuning
+          image: alpine:3.18
+          command:
+            - sh
+            - -c
+            - |
+              #!/bin/sh
+              set -e
+              
+              echo "Applying Kafka node optimizations..."
+              
+              # VM settings for Kafka
+              sysctl -w vm.swappiness=1
+              sysctl -w vm.max_map_count=262144
+              sysctl -w vm.dirty_ratio=80
+              sysctl -w vm.dirty_background_ratio=5
+              
+              # Network settings
+              sysctl -w net.core.rmem_max=134217728
+              sysctl -w net.core.wmem_max=134217728
+              sysctl -w net.core.rmem_default=134217728
+              sysctl -w net.core.wmem_default=134217728
+              sysctl -w net.ipv4.tcp_rmem='4096 87380 134217728'
+              sysctl -w net.ipv4.tcp_wmem='4096 65536 134217728'
+              sysctl -w net.core.netdev_max_backlog=5000
+              sysctl -w net.ipv4.tcp_window_scaling=1
+              
+              # File descriptor limits
+              echo "* soft nofile 100000" >> /host-limits/limits.conf
+              echo "* hard nofile 100000" >> /host-limits/limits.conf
+              
+              echo "Kafka node tuning complete. Settings applied:"
+              sysctl vm.swappiness vm.max_map_count vm.dirty_ratio vm.dirty_background_ratio
+              sysctl net.core.rmem_max net.core.wmem_max
+              sysctl net.ipv4.tcp_rmem net.ipv4.tcp_wmem
+              
+              echo "Keeping pod alive to maintain settings..."
+              tail -f /dev/null
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: host-limits
+              mountPath: /host-limits
+      volumes:
+        - name: host-limits
+          hostPath:
+            path: /etc/security
+            type: Directory
+---
+# Optional: Create a ConfigMap with tuning documentation
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-tuning-info
+  namespace: kube-system
+data:
+  tuning-applied.txt: |
+    Kafka Node Tuning Settings Applied:
+    
+    VM Settings:
+    - vm.swappiness=1              # Minimize swapping
+    - vm.max_map_count=262144      # For Kafka and Elasticsearch
+    - vm.dirty_ratio=80            # Allow more dirty pages
+    - vm.dirty_background_ratio=5  # Background flushing threshold
+    
+    Network Settings:
+    - net.core.rmem_max=134217728  # 128MB receive buffer
+    - net.core.wmem_max=134217728  # 128MB send buffer
+    - TCP buffers optimized for high-throughput
+    
+    File Descriptors:
+    - nofile limit increased to 100000
+    
+    These settings optimize the node for Kafka workloads.
