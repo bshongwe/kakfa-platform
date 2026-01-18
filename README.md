@@ -41,6 +41,7 @@ kakfa-platform/
 │   ├── PHASE_A_IMPLEMENTATION.md     # Detailed Phase A guide
 │   ├── PHASE_B_EXACTLY_ONCE.md       # Next: Exactly-once semantics
 │   ├── MICROSERVICES_IMPLEMENTATION.md  # ✅ Microservices guide (NEW!)
+│   ├── CICD_SETUP.md                 # ✅ Enterprise CI/CD setup (NEW!)
 │   └── INSTALLATION_METHODS.md       # Installation approaches
 ├── platform/
 │   ├── kafka/
@@ -58,20 +59,37 @@ kakfa-platform/
 │   ├── build-packages.yml            # Docker build & push with security scanning
 │   ├── release.yml                   # Automated releases with changelog
 │   └── kafka-deploy.yml              # Infrastructure deployment with rollback
+├── ci-cd/                            # ✅ Enterprise GitOps (NEW!)
+│   ├── argocd/                       # ArgoCD applications with RBAC
+│   └── github-actions/               # Infrastructure deployment workflows
 ├── policies/opa/                     # ✅ Policy-as-Code (NEW!)
 │   ├── kafka-topics.rego             # Topic governance (15 rules)
 │   └── kafka-users.rego              # User/ACL governance (18 rules)
 ├── scripts/
-│   └── rollback/                     # ✅ Automated rollback (NEW!)
-│       ├── rollback-drill.sh         # Rollback testing automation
-│       └── manual-rollback.sh        # Emergency rollback script
+│   ├── rollback/                     # ✅ Automated rollback (NEW!)
+│   │   ├── rollback-drill.sh         # Rollback testing automation
+│   │   └── manual-rollback.sh        # Emergency rollback script
+│   ├── install-strimzi.sh            # Operator installation
+│   ├── deploy-phase-a.sh             # Phase A deployment ✨ NEW
+│   └── complete-install.sh           # End-to-end automation
 ├── chaos/experiments/                # ✅ Chaos engineering (NEW!)
 │   ├── deployment/                   # Deployment failure scenarios
 │   └── 01-kill-leader-broker.yaml   # Broker failure testing
-└── scripts/
-    ├── install-strimzi.sh            # Operator installation
-    ├── deploy-phase-a.sh             # Phase A deployment ✨ NEW
-    └── complete-install.sh           # End-to-end automation
+├── runbooks/                         # ✅ Incident response (NEW!)
+│   └── broker-outage.md              # Production incident runbook
+├── observability/                    # ✅ Monitoring stack (NEW!)
+│   ├── prometheus/                   # Metrics collection
+│   ├── grafana/                      # Dashboards
+│   └── alerts/                       # Alert rules
+├── infra/                            # ✅ Infrastructure as Code (NEW!)
+│   ├── terraform/                    # Terraform modules
+│   └── environments/                 # Environment configs (dev/staging/prod)
+├── helm/                             # ✅ Helm charts (NEW!)
+│   └── kafka-platform/               # Platform Helm chart
+└── security/                         # ✅ Security configurations (NEW!)
+    ├── acl/                          # Access control documentation
+    └── secrets/                      # Secret management
+    # Note: TLS certificates are auto-managed by Strimzi in K8s secrets
 ```
 
 
