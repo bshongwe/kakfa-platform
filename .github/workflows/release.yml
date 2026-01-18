@@ -3,7 +3,7 @@ name: Automated Release
 on:
   push:
     branches: [main]
-    paths: ['package.json', 'microservices/*/package.json']
+    paths: ['microservices/*/package.json']
 
 permissions:
   contents: write
