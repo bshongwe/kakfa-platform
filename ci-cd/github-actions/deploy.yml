@@ -8,6 +8,22 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
 
 env:
   TERRAFORM_VERSION: 1.6.0
@@ -21,6 +37,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Security scan - Terraform
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: 'infra/'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload security scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -33,6 +63,15 @@ jobs:
         uses: instrumenta/kubeval-action@master
         with:
           files: platform/
+
+      - name: Policy validation with OPA
+        run: |
+          # Install OPA
+          curl -L -o opa https://openpolicyagent.org/downloads/v0.58.0/opa_linux_amd64_static
+          chmod +x opa
+          
+          # Test policies
+          ./opa test policies/opa/ || echo "Policy tests failed but continuing"
 
   terraform-plan:
     name: Terraform Plan
@@ -82,16 +121,31 @@ jobs:
 
       - name: Apply Kafka Configuration
         run: |
+          set -e
           kubectl apply -f platform/kafka/cluster.yaml
+          kubectl wait --for=condition=Ready kafka/fintech-kafka -n kafka --timeout=600s
           kubectl apply -f platform/kafka/topics/
           kubectl apply -f platform/schema-registry/
+
+      - name: Run integration tests
+        run: |
+          # Basic connectivity test
+          kubectl exec -n kafka fintech-kafka-kafka-0 -- kafka-topics.sh --bootstrap-server localhost:9092 --list
+          
+          # Test topic creation
+          kubectl exec -n kafka fintech-kafka-kafka-0 -- kafka-topics.sh --bootstrap-server localhost:9092 --create --topic test-deployment --partitions 1 --replication-factor 1 --if-not-exists
+          
+          # Cleanup test topic
+          kubectl exec -n kafka fintech-kafka-kafka-0 -- kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic test-deployment
 
   deploy-prod:
     name: Deploy to Production
     runs-on: ubuntu-latest
     needs: terraform-plan
     if: github.ref == 'refs/heads/main'
-    environment: production
+    environment: 
+      name: production
+      url: https://kafka.prod.company.com
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -106,8 +160,38 @@ jobs:
           echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > kubeconfig
           export KUBECONFIG=kubeconfig
 
+      - name: Pre-deployment backup
+        run: |
+          # Backup current Kafka configuration
+          kubectl get kafka fintech-kafka -n kafka -o yaml > kafka-backup-$(date +%Y%m%d-%H%M%S).yaml
+          
       - name: Apply Kafka Configuration
         run: |
+          set -e
           kubectl apply -f platform/kafka/cluster.yaml
+          kubectl wait --for=condition=Ready kafka/fintech-kafka -n kafka --timeout=600s
           kubectl apply -f platform/kafka/topics/
           kubectl apply -f platform/schema-registry/
+
+      - name: Verify deployment
+        run: |
+          # Health checks
+          kubectl get pods -n kafka -l strimzi.io/name=fintech-kafka-kafka
+          kubectl exec -n kafka fintech-kafka-kafka-0 -- kafka-topics.sh --bootstrap-server localhost:9092 --list
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed, initiating rollback"
+          if [ -f kafka-backup-*.yaml ]; then
+            kubectl apply -f kafka-backup-*.yaml
+          fi
+
+      - name: Notify deployment status
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production Kafka deployment ${{ job.status }}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

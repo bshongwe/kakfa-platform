@@ -3,8 +3,16 @@ kind: Application
 metadata:
   name: kafka-platform
   namespace: argocd
+  labels:
+    app.kubernetes.io/name: kafka-platform
+    app.kubernetes.io/component: messaging
+    environment: production
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: kafka-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: kafka-alerts
 spec:
-  project: default
+  project: kafka-platform
   
   source:
     repoURL: https://github.com/bshongwe/kakfa-platform.git
@@ -22,6 +30,9 @@ spec:
       allowEmpty: false
     syncOptions:
       - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:
@@ -29,19 +40,39 @@ spec:
         factor: 2
         maxDuration: 3m
   
+  revisionHistoryLimit: 10
+  
   ignoreDifferences:
     - group: apps
       kind: Deployment
       jsonPointers:
         - /spec/replicas
+    - group: kafka.strimzi.io
+      kind: Kafka
+      jsonPointers:
+        - /status
+        - /metadata/generation
+  
+  info:
+    - name: 'Documentation'
+      value: 'https://github.com/bshongwe/kakfa-platform/blob/main/README.md'
+    - name: 'Runbooks'
+      value: 'https://github.com/bshongwe/kakfa-platform/tree/main/runbooks'
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: kafka-monitoring
   namespace: argocd
+  labels:
+    app.kubernetes.io/name: kafka-monitoring
+    app.kubernetes.io/component: observability
+    environment: production
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: kafka-deployments
 spec:
-  project: default
+  project: kafka-platform
   
   source:
     repoURL: https://github.com/bshongwe/kakfa-platform.git
@@ -58,3 +89,106 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+  
+  revisionHistoryLimit: 5
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kafka-microservices
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: kafka-microservices
+    app.kubernetes.io/component: application
+    environment: production
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: kafka-deployments
+spec:
+  project: kafka-platform
+  
+  source:
+    repoURL: https://github.com/bshongwe/kakfa-platform.git
+    targetRevision: HEAD
+    path: microservices
+    directory:
+      recurse: true
+      include: '*/k8s/*.yaml'
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kafka-apps
+  
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  
+  revisionHistoryLimit: 10
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: kafka-platform
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: kafka-platform-project
+spec:
+  description: Kafka Platform Project for Enterprise Event Streaming
+  
+  sourceRepos:
+    - 'https://github.com/bshongwe/kakfa-platform.git'
+  
+  destinations:
+    - namespace: kafka
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: kafka-apps
+      server: https://kubernetes.default.svc
+  
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+  
+  namespaceResourceWhitelist:
+    - group: ''
+      kind: '*'
+    - group: apps
+      kind: '*'
+    - group: kafka.strimzi.io
+      kind: '*'
+    - group: monitoring.coreos.com
+      kind: '*'
+  
+  roles:
+    - name: kafka-admin
+      description: Full access to Kafka platform
+      policies:
+        - p, proj:kafka-platform:kafka-admin, applications, *, kafka-platform/*, allow
+        - p, proj:kafka-platform:kafka-admin, repositories, *, *, allow
+      groups:
+        - kafka-platform:admins
+    
+    - name: kafka-developer
+      description: Developer access to Kafka applications
+      policies:
+        - p, proj:kafka-platform:kafka-developer, applications, get, kafka-platform/*, allow
+        - p, proj:kafka-platform:kafka-developer, applications, sync, kafka-platform/kafka-microservices, allow
+      groups:
+        - kafka-platform:developers
