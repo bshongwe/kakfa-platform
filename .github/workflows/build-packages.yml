@@ -3,7 +3,7 @@ name: Build and Publish Packages
 on:
   push:
     branches: [main, develop]
-    paths: ['microservices/**']
+    paths: ['microservices/**', 'package.json']
   release:
     types: [published]
   workflow_dispatch:
