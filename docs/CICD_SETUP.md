@@ -1,6 +1,6 @@
 # CI/CD Setup Guide
 
-This guide walks you through setting up GitHub Secrets for the Kafka Platform CI/CD pipeline.
+This guide walks you through setting up the enterprise-grade CI/CD pipeline for the Kafka Platform.
 
 ## Quick Setup
 
@@ -14,6 +14,29 @@ This guide walks you through setting up GitHub Secrets for the Kafka Platform CI
 git push origin main
 ```
 
+## CI/CD Architecture
+
+The platform uses **dual CI/CD approaches**:
+
+1. **GitHub Actions** - Application deployments (microservices, Docker images)
+2. **ArgoCD** - Infrastructure deployments (Kafka cluster, GitOps)
+
+### GitHub Actions Workflows
+
+| Workflow | Purpose | Triggers |
+|----------|---------|----------|
+| `build-packages.yml` | Build & push Docker images | Code changes, releases |
+| `release.yml` | Automated releases | Version changes |
+| `deploy.yml` | Infrastructure deployment | Infrastructure changes |
+
+### ArgoCD Applications
+
+| Application | Purpose | Sync Wave |
+|-------------|---------|----------|
+| `kafka-platform` | Kafka cluster & topics | 1 |
+| `kafka-monitoring` | Observability stack | 2 |
+| `kafka-microservices` | Application deployments | 3 |
+
 ## Required Secrets
 
 The CI/CD pipeline expects these secrets in your GitHub repository:
@@ -23,9 +46,31 @@ The CI/CD pipeline expects these secrets in your GitHub repository:
 | `KUBECONFIG_DEV` | Development | No | Base64 encoded kubeconfig for dev cluster |
 | `KUBECONFIG_STAGING` | Staging | No | Base64 encoded kubeconfig for staging cluster |
 | `KUBECONFIG_PROD` | Production | Yes* | Base64 encoded kubeconfig for prod cluster |
-| `SLACK_WEBHOOK` | All | No | Slack webhook URL for notifications |
+| `SLACK_WEBHOOK_URL` | All | No | Slack webhook URL for notifications |
+| `GITHUB_TOKEN` | All | Auto | Automatically provided by GitHub Actions |
 
 *Required for production deployments
+
+## Enterprise Features
+
+### Security & Compliance
+- **Security scanning** with Trivy (SAST)
+- **SARIF upload** to GitHub Security tab
+- **Policy validation** with OPA
+- **Dependency scanning** for vulnerabilities
+
+### Deployment Safety
+- **Manual approval gates** for production
+- **Pre-deployment backups**
+- **Health checks** and verification
+- **Automatic rollback** on failure
+- **Integration tests** in dev environment
+
+### Observability
+- **Slack notifications** for deployment status
+- **GitHub Container Registry** for image storage
+- **Automated changelog** generation
+- **Release notes** with commit history
 
 ## Step-by-Step Setup
 

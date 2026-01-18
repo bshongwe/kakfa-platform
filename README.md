@@ -54,8 +54,10 @@ kakfa-platform/
 │   └── schema-registry/              # Confluent Schema Registry
 ├── schemas/
 │   └── avro/                         # Avro event schemas (4 schemas)
-├── .github/workflows/                # ✅ CI/CD automation (NEW!)
-│   └── kafka-deploy.yml              # 8-stage deployment pipeline
+├── .github/workflows/                # ✅ Enterprise CI/CD automation (NEW!)
+│   ├── build-packages.yml            # Docker build & push with security scanning
+│   ├── release.yml                   # Automated releases with changelog
+│   └── kafka-deploy.yml              # Infrastructure deployment with rollback
 ├── policies/opa/                     # ✅ Policy-as-Code (NEW!)
 │   ├── kafka-topics.rego             # Topic governance (15 rules)
 │   └── kafka-users.rego              # User/ACL governance (18 rules)
